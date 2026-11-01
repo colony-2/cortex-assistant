@@ -1,0 +1,31 @@
+id: cortex-assistant-document-verification
+version: 1.0.0
+inputs:
+  api_version: ${{ inputs.api_version }}
+  request: ${{ inputs.request }}
+  target_directory: ${{ inputs.target_directory }}
+  candidate: ${{ inputs.candidate }}
+  base: ${{ inputs.base }}
+  documents: ${{ inputs.documents }}
+  settings: ${{ inputs.settings }}
+sequence:
+- id: verify
+  op: command_execution
+  const: true
+  inputs:
+    timeout: 90s
+    run: |
+      set -eu
+      python3 "$WORKTREE/.c2/recipes/hooks/build/verify.py"
+    env:
+      WORKTREE: ${{ context.environment.op.worktree_path }}
+      DIRECTORY: ${{ inputs.target_directory }}
+      CANDIDATE: ${{ inputs.candidate }}
+      API_VERSION: ${{ inputs.api_version }}
+      OUTBOX: ${{ context.environment.op.outbox }}
+outputs:
+  api_version: c2.build-hook/v1
+  status: ${{ json_parse(sequence.verify.outputs.stdout).status }}
+  summary: ${{ json_parse(sequence.verify.outputs.stdout).summary }}
+  artifact_refs:
+    verification-evidence.json: ${{ sequence.verify.artifacts['verification-evidence.json'] }}

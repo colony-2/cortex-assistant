@@ -1,0 +1,13 @@
+id: verify-integration-boundary
+sequence:
+- id: actual_wrapper
+  include: ./recipes/develop/verify.yaml
+  inputs:
+    request: Documentation verification acceptance fixture
+    target_directory: .
+    documents: {}
+    settings: null
+outputs:
+  result: ${{ sequence.actual_wrapper.outputs.result }}
+  allowed: ${{ sequence.actual_wrapper.outputs.allowed }}
+  artifact_refs: ${{ sequence.actual_wrapper.outputs.artifact_refs }}
