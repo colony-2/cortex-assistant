@@ -1,0 +1,20 @@
+# Deprecated: v1 execution only; new sessions use the registered cortex_assistant:run activity.
+name: cortex-assistant-helper
+description: Typed assistant tasks over existing c2j replay and input primitives
+command: [go, run, ../../cmd/assistant-op]
+dependencies:
+  - nix:github:NixOS/nixpkgs/e7439b6b14ad3cc35d05608ebca9bce01a25f5f8#go
+input_schema:
+  type: object
+  additionalProperties: false
+  required: [action]
+  properties:
+    action:
+      enum: [capture, assemble, response, form, accept, prepare-action, dispatch]
+    artifact_outbox_path:
+      type: string
+      default: '{{ context.environment.op.outbox }}'
+    model:
+      type: object
+output_schema:
+  type: object

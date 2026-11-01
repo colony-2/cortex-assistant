@@ -1,0 +1,687 @@
+# JSON is a YAML subset. Routing-only cases; actual registered activity coverage is in Go integration tests.
+{
+  "recipe": "../session.yaml",
+  "cases": [
+    {
+      "id": "finish-reaches-success-without-followup-model",
+      "type": "integration_case",
+      "runtime": {
+        "responses": [
+          {
+            "node_path": "cortex-assistant-session/prompt/sequence/await-human",
+            "response": {
+              "command": "finish"
+            }
+          }
+        ]
+      },
+      "inputs": {
+        "protocol": "cortex-assistant/2",
+        "session_id": "s",
+        "prompt": "hello",
+        "source": {
+          "kind": "value",
+          "format": "json",
+          "value": {
+            "kind": "global"
+          }
+        },
+        "attachments": {}
+      },
+      "options": {
+        "validation_mode": "path_only"
+      },
+      "mocks": {
+        "ops": [
+          {
+            "match": {
+              "node_path": "cortex-assistant-session/capture/sequence/capture"
+            },
+            "behavior": {
+              "mode": "return",
+              "outputs": {
+                "kind": "capture"
+              }
+            }
+          },
+          {
+            "match": {
+              "node_path": "cortex-assistant-session/infer/sequence/assemble"
+            },
+            "behavior": {
+              "mode": "return",
+              "outputs": {
+                "model_input": {
+                  "default_provider": "fixture",
+                  "default_model": "fixture",
+                  "prompt": "hello",
+                  "system_prompt": "fixture",
+                  "response_schema": {
+                    "type": "object"
+                  }
+                }
+              }
+            },
+            "repeat": true
+          },
+          {
+            "match": {
+              "node_path": "cortex-assistant-session/infer/sequence/infer"
+            },
+            "behavior": {
+              "mode": "return",
+              "outputs": {
+                "response": "{}",
+                "model": "fixture",
+                "usage": {}
+              }
+            },
+            "repeat": true
+          },
+          {
+            "match": {
+              "node_path": "cortex-assistant-session/infer/sequence/response"
+            },
+            "behavior": {
+              "mode": "return",
+              "outputs": {
+                "kind": "response"
+              }
+            },
+            "repeat": true
+          },
+          {
+            "match": {
+              "node_path": "cortex-assistant-session/prompt/sequence/form"
+            },
+            "behavior": {
+              "mode": "return",
+              "outputs": {
+                "form": {
+                  "request": {
+                    "protocol": "cortex-assistant/2",
+                    "session_id": "s"
+                  },
+                  "response_schema": {
+                    "type": "object"
+                  }
+                }
+              }
+            },
+            "repeat": true
+          },
+          {
+            "match": {
+              "node_path": "cortex-assistant-session/prompt/sequence/await-human"
+            },
+            "behavior": {
+              "mode": "passthrough"
+            },
+            "repeat": true
+          },
+          {
+            "match": {
+              "node_path": "cortex-assistant-session/prompt/sequence/accept"
+            },
+            "behavior": {
+              "mode": "return",
+              "outputs": {
+                "command": {
+                  "command": "finish"
+                }
+              }
+            }
+          }
+        ]
+      },
+      "assertions": [
+        {
+          "type": "output_equals",
+          "path": "status",
+          "value": "finished"
+        },
+        {
+          "type": "op_call_count",
+          "node_path": "cortex-assistant-session/infer/sequence/infer",
+          "value": 1
+        },
+        {
+          "type": "op_call_count",
+          "node_path": "cortex-assistant-session/action/sequence/dispatch",
+          "value": 0
+        }
+      ]
+    },
+    {
+      "id": "send-then-finish",
+      "type": "integration_case",
+      "runtime": {
+        "responses": [
+          {
+            "node_path": "cortex-assistant-session/prompt/sequence/await-human",
+            "response": {
+              "command": "send",
+              "prompt": "next",
+              "attachments": {}
+            }
+          },
+          {
+            "node_path": "cortex-assistant-session/prompt/sequence/await-human",
+            "response": {
+              "command": "finish"
+            }
+          }
+        ]
+      },
+      "inputs": {
+        "protocol": "cortex-assistant/2",
+        "session_id": "s",
+        "prompt": "hello",
+        "source": {
+          "kind": "value",
+          "format": "json",
+          "value": {
+            "kind": "global"
+          }
+        },
+        "attachments": {}
+      },
+      "options": {
+        "validation_mode": "path_only"
+      },
+      "mocks": {
+        "ops": [
+          {
+            "match": {
+              "node_path": "cortex-assistant-session/capture/sequence/capture"
+            },
+            "behavior": {
+              "mode": "return",
+              "outputs": {
+                "kind": "capture"
+              }
+            }
+          },
+          {
+            "match": {
+              "node_path": "cortex-assistant-session/infer/sequence/assemble"
+            },
+            "behavior": {
+              "mode": "return",
+              "outputs": {
+                "model_input": {
+                  "default_provider": "fixture",
+                  "default_model": "fixture",
+                  "prompt": "hello",
+                  "system_prompt": "fixture",
+                  "response_schema": {
+                    "type": "object"
+                  }
+                }
+              }
+            },
+            "repeat": true
+          },
+          {
+            "match": {
+              "node_path": "cortex-assistant-session/infer/sequence/infer"
+            },
+            "behavior": {
+              "mode": "return",
+              "outputs": {
+                "response": "{}",
+                "model": "fixture",
+                "usage": {}
+              }
+            },
+            "repeat": true
+          },
+          {
+            "match": {
+              "node_path": "cortex-assistant-session/infer/sequence/response"
+            },
+            "behavior": {
+              "mode": "return",
+              "outputs": {
+                "kind": "response"
+              }
+            },
+            "repeat": true
+          },
+          {
+            "match": {
+              "node_path": "cortex-assistant-session/prompt/sequence/form"
+            },
+            "behavior": {
+              "mode": "return",
+              "outputs": {
+                "form": {
+                  "request": {
+                    "protocol": "cortex-assistant/2",
+                    "session_id": "s"
+                  },
+                  "response_schema": {
+                    "type": "object"
+                  }
+                }
+              }
+            },
+            "repeat": true
+          },
+          {
+            "match": {
+              "node_path": "cortex-assistant-session/prompt/sequence/await-human"
+            },
+            "behavior": {
+              "mode": "passthrough"
+            },
+            "repeat": true
+          },
+          {
+            "match": {
+              "node_path": "cortex-assistant-session/prompt/sequence/accept"
+            },
+            "behavior": {
+              "mode": "return",
+              "outputs": {
+                "command": {
+                  "command": "send"
+                }
+              }
+            }
+          },
+          {
+            "match": {
+              "node_path": "cortex-assistant-session/prompt/sequence/accept"
+            },
+            "behavior": {
+              "mode": "return",
+              "outputs": {
+                "command": {
+                  "command": "finish"
+                }
+              }
+            }
+          }
+        ]
+      },
+      "assertions": [
+        {
+          "type": "output_equals",
+          "path": "status",
+          "value": "finished"
+        },
+        {
+          "type": "op_call_count",
+          "node_path": "cortex-assistant-session/infer/sequence/infer",
+          "value": 2
+        },
+        {
+          "type": "op_call_count",
+          "node_path": "cortex-assistant-session/action/sequence/dispatch",
+          "value": 0
+        }
+      ]
+    },
+    {
+      "id": "confirm-then-finish",
+      "type": "integration_case",
+      "runtime": {
+        "responses": [
+          {
+            "node_path": "cortex-assistant-session/prompt/sequence/await-human",
+            "response": {
+              "command": "confirm"
+            }
+          },
+          {
+            "node_path": "cortex-assistant-session/prompt/sequence/await-human",
+            "response": {
+              "command": "finish"
+            }
+          }
+        ]
+      },
+      "inputs": {
+        "protocol": "cortex-assistant/2",
+        "session_id": "s",
+        "prompt": "hello",
+        "source": {
+          "kind": "value",
+          "format": "json",
+          "value": {
+            "kind": "global"
+          }
+        },
+        "attachments": {}
+      },
+      "options": {
+        "validation_mode": "path_only"
+      },
+      "mocks": {
+        "ops": [
+          {
+            "match": {
+              "node_path": "cortex-assistant-session/capture/sequence/capture"
+            },
+            "behavior": {
+              "mode": "return",
+              "outputs": {
+                "kind": "capture"
+              }
+            }
+          },
+          {
+            "match": {
+              "node_path": "cortex-assistant-session/infer/sequence/assemble"
+            },
+            "behavior": {
+              "mode": "return",
+              "outputs": {
+                "model_input": {
+                  "default_provider": "fixture",
+                  "default_model": "fixture",
+                  "prompt": "hello",
+                  "system_prompt": "fixture",
+                  "response_schema": {
+                    "type": "object"
+                  }
+                }
+              }
+            },
+            "repeat": true
+          },
+          {
+            "match": {
+              "node_path": "cortex-assistant-session/infer/sequence/infer"
+            },
+            "behavior": {
+              "mode": "return",
+              "outputs": {
+                "response": "{}",
+                "model": "fixture",
+                "usage": {}
+              }
+            },
+            "repeat": true
+          },
+          {
+            "match": {
+              "node_path": "cortex-assistant-session/infer/sequence/response"
+            },
+            "behavior": {
+              "mode": "return",
+              "outputs": {
+                "kind": "response"
+              }
+            },
+            "repeat": true
+          },
+          {
+            "match": {
+              "node_path": "cortex-assistant-session/prompt/sequence/form"
+            },
+            "behavior": {
+              "mode": "return",
+              "outputs": {
+                "form": {
+                  "request": {
+                    "protocol": "cortex-assistant/2",
+                    "session_id": "s"
+                  },
+                  "response_schema": {
+                    "type": "object"
+                  }
+                }
+              }
+            },
+            "repeat": true
+          },
+          {
+            "match": {
+              "node_path": "cortex-assistant-session/prompt/sequence/await-human"
+            },
+            "behavior": {
+              "mode": "passthrough"
+            },
+            "repeat": true
+          },
+          {
+            "match": {
+              "node_path": "cortex-assistant-session/prompt/sequence/accept"
+            },
+            "behavior": {
+              "mode": "return",
+              "outputs": {
+                "command": {
+                  "command": "confirm"
+                }
+              }
+            }
+          },
+          {
+            "match": {
+              "node_path": "cortex-assistant-session/prompt/sequence/accept"
+            },
+            "behavior": {
+              "mode": "return",
+              "outputs": {
+                "command": {
+                  "command": "finish"
+                }
+              }
+            }
+          },
+          {
+            "match": {
+              "node_path": "cortex-assistant-session/action/sequence/prepare-action"
+            },
+            "behavior": {
+              "mode": "return",
+              "outputs": {
+                "kind": "prepare-action"
+              }
+            }
+          },
+          {
+            "match": {
+              "node_path": "cortex-assistant-session/action/sequence/dispatch"
+            },
+            "behavior": {
+              "mode": "return",
+              "outputs": {
+                "kind": "dispatch"
+              }
+            }
+          }
+        ]
+      },
+      "assertions": [
+        {
+          "type": "output_equals",
+          "path": "status",
+          "value": "finished"
+        },
+        {
+          "type": "op_call_count",
+          "node_path": "cortex-assistant-session/infer/sequence/infer",
+          "value": 1
+        },
+        {
+          "type": "op_call_count",
+          "node_path": "cortex-assistant-session/action/sequence/dispatch",
+          "value": 1
+        }
+      ]
+    },
+    {
+      "id": "invalid-then-finish",
+      "type": "integration_case",
+      "runtime": {
+        "responses": [
+          {
+            "node_path": "cortex-assistant-session/prompt/sequence/await-human",
+            "response": {
+              "command": "invalid"
+            }
+          },
+          {
+            "node_path": "cortex-assistant-session/prompt/sequence/await-human",
+            "response": {
+              "command": "finish"
+            }
+          }
+        ]
+      },
+      "inputs": {
+        "protocol": "cortex-assistant/2",
+        "session_id": "s",
+        "prompt": "hello",
+        "source": {
+          "kind": "value",
+          "format": "json",
+          "value": {
+            "kind": "global"
+          }
+        },
+        "attachments": {}
+      },
+      "options": {
+        "validation_mode": "path_only"
+      },
+      "mocks": {
+        "ops": [
+          {
+            "match": {
+              "node_path": "cortex-assistant-session/capture/sequence/capture"
+            },
+            "behavior": {
+              "mode": "return",
+              "outputs": {
+                "kind": "capture"
+              }
+            }
+          },
+          {
+            "match": {
+              "node_path": "cortex-assistant-session/infer/sequence/assemble"
+            },
+            "behavior": {
+              "mode": "return",
+              "outputs": {
+                "model_input": {
+                  "default_provider": "fixture",
+                  "default_model": "fixture",
+                  "prompt": "hello",
+                  "system_prompt": "fixture",
+                  "response_schema": {
+                    "type": "object"
+                  }
+                }
+              }
+            },
+            "repeat": true
+          },
+          {
+            "match": {
+              "node_path": "cortex-assistant-session/infer/sequence/infer"
+            },
+            "behavior": {
+              "mode": "return",
+              "outputs": {
+                "response": "{}",
+                "model": "fixture",
+                "usage": {}
+              }
+            },
+            "repeat": true
+          },
+          {
+            "match": {
+              "node_path": "cortex-assistant-session/infer/sequence/response"
+            },
+            "behavior": {
+              "mode": "return",
+              "outputs": {
+                "kind": "response"
+              }
+            },
+            "repeat": true
+          },
+          {
+            "match": {
+              "node_path": "cortex-assistant-session/prompt/sequence/form"
+            },
+            "behavior": {
+              "mode": "return",
+              "outputs": {
+                "form": {
+                  "request": {
+                    "protocol": "cortex-assistant/2",
+                    "session_id": "s"
+                  },
+                  "response_schema": {
+                    "type": "object"
+                  }
+                }
+              }
+            },
+            "repeat": true
+          },
+          {
+            "match": {
+              "node_path": "cortex-assistant-session/prompt/sequence/await-human"
+            },
+            "behavior": {
+              "mode": "passthrough"
+            },
+            "repeat": true
+          },
+          {
+            "match": {
+              "node_path": "cortex-assistant-session/prompt/sequence/accept"
+            },
+            "behavior": {
+              "mode": "return",
+              "outputs": {
+                "command": {
+                  "command": "invalid"
+                }
+              }
+            }
+          },
+          {
+            "match": {
+              "node_path": "cortex-assistant-session/prompt/sequence/accept"
+            },
+            "behavior": {
+              "mode": "return",
+              "outputs": {
+                "command": {
+                  "command": "finish"
+                }
+              }
+            }
+          }
+        ]
+      },
+      "assertions": [
+        {
+          "type": "output_equals",
+          "path": "status",
+          "value": "finished"
+        },
+        {
+          "type": "op_call_count",
+          "node_path": "cortex-assistant-session/infer/sequence/infer",
+          "value": 1
+        },
+        {
+          "type": "op_call_count",
+          "node_path": "cortex-assistant-session/action/sequence/dispatch",
+          "value": 0
+        }
+      ]
+    }
+  ]
+}

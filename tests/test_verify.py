@@ -141,7 +141,14 @@ class Runtime(unittest.TestCase):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
         self.root = Path(self.temp.name) / 'candidate'
-        subprocess.run(['git', 'clone', '-q', '--shared', str(ROOT), str(self.root)], check=True)
+        self.root.mkdir()
+        (self.root / 'PURPOSE.md').write_text(VALID)
+        # These are documentation fixtures, independent of candidate application
+        # growth. Real application selection is covered separately below.
+        for args in (['init', '-q'], ['add', 'PURPOSE.md'],
+                     ['-c', 'user.name=Verifier', '-c', 'user.email=verify@example.invalid',
+                      'commit', '-qm', 'disposable document fixture']):
+            subprocess.run(['git', '-C', str(self.root), *args], check=True)
         self.head = subprocess.check_output(['git', '-C', str(self.root), 'rev-parse', 'HEAD']).decode().strip()
 
     def runner(self, **kwargs):
@@ -268,6 +275,50 @@ class Runtime(unittest.TestCase):
             self.assertEqual(result['status'], 'failed')
             self.assertIn('after', result)
 
+    def application_fixture(self):
+        for name in v.APPLICATION_FILES:
+            path = self.root / name
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text('fixture\n')
+        subprocess.run(['git', '-C', str(self.root), 'add', '.'], check=True)
+
+    def test_application_mapping_requires_complete_inventory(self):
+        (self.root / 'go.mod').write_text('module fixture\n')
+        subprocess.run(['git', '-C', str(self.root), 'add', '.'], check=True)
+        result = self.runner().run()
+        self.assertEqual(result['status'], 'failed')
+        self.assertIn('incomplete application coverage', result['errors'][0])
+
+    def test_application_checks_and_failure_propagation(self):
+        self.application_fixture()
+        for failure in (None, 'gofmt', 'vet', 'test', 'native', 'hook', 'missing-go'):
+            with self.subTest(failure=failure):
+                run = self.runner()
+                original = run.command
+                calls = []
+                def command(args, timeout=5):
+                    kind = None
+                    if args[0] == 'gofmt': kind = 'gofmt'
+                    elif args[0] == 'go':
+                        kind = {'version': 'missing-go', 'vet': 'vet', 'test': 'test', 'run': 'native'}[args[1]]
+                    elif '-m' in args and 'unittest' in args: kind = 'hook'
+                    if kind:
+                        calls.append(kind)
+                        if failure == kind:
+                            if kind == 'gofmt': return b'assistant/client.go\n'
+                            raise RuntimeError('injected ' + kind + ' failure')
+                        return b''
+                    return original(args, timeout)
+                with patch.object(run, 'command', side_effect=command): result = run.run()
+                self.assertEqual(result['status'], 'passed' if failure is None else 'failed', result)
+                self.assertEqual(result['before'], result['after'])
+                if failure is None:
+                    self.assertEqual(calls, ['missing-go', 'gofmt', 'vet', 'test', 'native', 'hook'])
+                    self.assertEqual(result['application']['state'], 'passed')
+                else:
+                    self.assertNotEqual(result['application']['state'], 'passed')
+
+
 
 class WrapperIntegration(unittest.TestCase):
     def test_actual_shared_wrapper_and_resolved_artifacts(self):
@@ -308,7 +359,7 @@ class WrapperIntegration(unittest.TestCase):
             command = ['c2j', 'test', 'run', '--file', str(suite), '--cell', str(ROOT),
                        '--artifact-mode', 'inline', '--artifact-max-bytes', '200000',
                        '--out-dir', str(output)]
-            process = subprocess.run(command, capture_output=True, text=True, timeout=90)
+            process = subprocess.run(command, capture_output=True, text=True, timeout=300)
             self.assertEqual(process.returncode, 0, process.stdout + process.stderr)
             for name, document, expected, allowed, diagnostic in scenarios:
                 result = json.loads((output / 'cases' / name / 'result.json').read_text())

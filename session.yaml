@@ -1,0 +1,98 @@
+id: cortex-assistant-session
+version: "2.0.0"
+desc: A conversation is the custom view of this job's recorded task data.
+input_schema:
+  protocol: {type: string, default_value: cortex-assistant/2}
+  session_id: {type: string}
+  prompt: {type: string}
+  source: {type: artifact}
+  attachments: {type: artifact_map, default_value: {}}
+inputs:
+  session_id: '${{ inputs.session_id }}'
+state:
+  initial: capture
+  states:
+    capture:
+      sequence:
+        - id: capture
+          op: cortex_assistant
+          inputs: {action: capture}
+      transitions:
+        - to: infer
+          when: 'true'
+    infer:
+      sequence:
+        - id: assemble
+          op: cortex_assistant
+          inputs: {action: assemble}
+        - id: infer
+          op: git+https://github.com/colony-2/c2ops.git//pydantic@f30202d13d197beaed7ba0bd0b120b04443728eb
+          inputs:
+            default_provider: '${{ sequence.assemble.outputs.model_input.default_provider }}'
+            default_model: '${{ sequence.assemble.outputs.model_input.default_model }}'
+            prompt: '${{ sequence.assemble.outputs.model_input.prompt }}'
+            system_prompt: '${{ sequence.assemble.outputs.model_input.system_prompt }}'
+            response_schema: '${{ sequence.assemble.outputs.model_input.response_schema }}'
+            tools: []
+            execute_tools: false
+            enable_tool_execution: false
+            enable_sandbox: false
+          catch:
+            - id: model-failure-to-input
+              when: 'true'
+              continue:
+                outputs:
+                  response: '{}'
+                  model: unavailable
+                  usage: {}
+        - id: response
+          op: cortex_assistant
+          inputs:
+            action: response
+            model:
+              response: '${{ sequence.infer.outputs.response }}'
+              model: '${{ sequence.infer.outputs.model }}'
+              usage: '${{ sequence.infer.outputs.usage }}'
+      transitions:
+        - to: prompt
+          when: 'true'
+    prompt:
+      sequence:
+        - id: form
+          op: cortex_assistant
+          inputs: {action: form}
+        - id: await-human
+          op: input
+          inputs:
+            form: '${{ sequence.form.outputs.form }}'
+        - id: accept
+          op: cortex_assistant
+          inputs: {action: accept}
+      outputs:
+        command: '${{ sequence.accept.outputs.command.command }}'
+      transitions:
+        - to: done
+          when: 'states.prompt.outputs.command == "finish"'
+        - to: action
+          when: 'states.prompt.outputs.command == "confirm"'
+        - to: infer
+          when: 'states.prompt.outputs.command == "send"'
+        - to: prompt
+          when: 'true'
+    action:
+      sequence:
+        - id: prepare-action
+          op: cortex_assistant
+          inputs: {action: prepare-action}
+        - id: dispatch
+          op: cortex_assistant
+          retry: {maximum_attempts: 6, initial_interval: 100ms, backoff_coefficient: 2, maximum_interval: 1s}
+          inputs: {action: dispatch}
+      transitions:
+        - to: prompt
+          when: 'true'
+    done:
+      sequence: []
+outputs:
+  session_id: '${{ inputs.session_id }}'
+  status: finished

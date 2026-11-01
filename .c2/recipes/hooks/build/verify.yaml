@@ -1,5 +1,5 @@
-id: cortex-assistant-document-verification
-version: 1.0.0
+id: cortex-assistant-verification
+version: 2.0.0
 inputs:
   api_version: ${{ inputs.api_version }}
   request: ${{ inputs.request }}
@@ -10,10 +10,12 @@ inputs:
   settings: ${{ inputs.settings }}
 sequence:
 - id: verify
+  execution_needs:
+    packages: [nix:github:NixOS/nixpkgs/e7439b6b14ad3cc35d05608ebca9bce01a25f5f8#go]
   op: command_execution
   const: true
   inputs:
-    timeout: 90s
+    timeout: 40m
     run: |
       set -eu
       python3 "$WORKTREE/.c2/recipes/hooks/build/verify.py"

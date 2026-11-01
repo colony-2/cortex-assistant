@@ -1,4 +1,4 @@
-"""Read-only documentation verification. Standard library only; see verification.md."""
+"""Read-only repository verification; see verification.md."""
 import hashlib
 import json
 import os
@@ -6,12 +6,17 @@ from pathlib import Path
 import re
 import subprocess
 import sys
+import tempfile
 from urllib.parse import unquote, urlsplit
 
 BASELINE = 'd2c4a33352f3f0e888b172946fca69caffd573df'
-OMISSIONS = ('Application compilation/lint/tests; serving protocol; durability/restart; '
-             'tenancy; model adaptation; rendering; goals; consumer integration; '
+# Explicitly reviewed inventory: additions still require a coverage decision.
+APPLICATION_FILES = frozenset(['README.md', 'assistant/activity.go', 'assistant/activity_test.go', 'assistant/assistant_test.go', 'assistant/client.go', 'assistant/discovery.go', 'assistant/guard_integration_test.go', 'assistant/lineage.go', 'assistant/provider_integration_test.go', 'assistant/registration.go', 'assistant/releases.go', 'assistant/replay.go', 'assistant/respond_errors_test.go', 'assistant/runtime_restoration_test.go', 'assistant/tasks.go', 'assistant/types.go', 'assistant/uploads.go', 'assistant/validate.go', 'assistant/worker_integration_test.go', 'cmd/assistant-op/main.go', 'docs/design.md', 'docs/hosting.md', 'docs/pending-input-agreement.md', 'docs/test-statements.md', 'go.mod', 'go.sum', 'ops/assistant/op.yaml', 'recipe-tests/session.test.yaml', 'session.yaml'])
+C2J_CLI = 'github.com/colony-2/c2j/cmd/c2j@v0.0.117-0.20261101173540-e8cd4f8c68b1'
+OMISSIONS = ('Actual-provider execution (opt-in, separately bound evidence); '
+             'published-selector verification; Cortex consumer integration; '
              'hosted CI runners/caches/platform matrices; publishing/deployment.')
+
 
 
 def literal_free(text):
@@ -117,6 +122,7 @@ class Verification:
                           'workflows': [], 'mapping': 'No CI or implementation at inspected main.'},
                          'omissions': OMISSIONS, 'commands': self.logs,
                          'document': {'state': 'not_attempted', 'document_checks': 0},
+                         'application': {'state': 'not_present'},
                          'errors': [], 'tools': {'python': sys.version.split()[0]}}
 
     def command(self, args, timeout=5):
@@ -185,15 +191,38 @@ class Verification:
             allowed = {'PURPOSE.md', '.c2/recipes/hooks/build/verify.yaml',
                        '.c2/recipes/hooks/build/verify.py', '.c2/recipes/hooks/build/verification.md',
                        'tests/test_verify.py', 'tests/verify.test.yaml', 'tests/verify-wrapper.yaml'}
-            unknown = sorted(set(names) - allowed)
+            unknown = sorted(set(names) - allowed - APPLICATION_FILES)
             if unknown:
                 raise ValueError('coverage mapping requires review for candidate files: ' + ', '.join(unknown))
+            application = bool(set(names) & APPLICATION_FILES)
+            if application:
+                missing = sorted(APPLICATION_FILES - set(names))
+                if missing:
+                    raise ValueError('incomplete application coverage inventory: ' + ', '.join(missing))
+                self.evidence['application'] = {'state': 'pending',
+                    'files': sorted(APPLICATION_FILES),
+                    'checks': ['gofmt', 'go vet', 'go test', 'native recipe cases', 'hook tests']}
             # Run document checking in a bounded child for independent exit/log evidence.
             self.evidence['document']['state'] = 'attempted'
             result = self.command([sys.executable, str(Path(__file__).resolve()), '--document', str(self.root)])
             self.evidence['document'] = dict(json.loads(result), state='passed')
             if self.evidence['document']['document_checks'] < 1:
                 raise ValueError('no document checks executed')
+            if application:
+                self.evidence['application']['state'] = 'attempted'
+                self.command(['go', 'version'])
+                gofiles = sorted(name for name in names if name.endswith('.go'))
+                unformatted = self.command(['gofmt', '-l', *gofiles])
+                if unformatted.strip():
+                    raise ValueError('unformatted Go files: ' + unformatted.decode().strip())
+                self.command(['go', 'vet', './...'], timeout=300)
+                self.command(['go', 'test', './...', '-count=1'], timeout=900)
+                with tempfile.TemporaryDirectory(prefix='assistant-verify-') as artifacts:
+                    self.command(['go', 'run', C2J_CLI, 'test', 'run', '--file',
+                        'recipe-tests/session.test.yaml', '--out-dir', artifacts], timeout=600)
+                self.command([sys.executable, '-m', 'unittest', 'discover', '-s', 'tests', '-v'], timeout=300)
+                self.evidence['application']['state'] = 'passed'
+
         except Exception as error:
             self.evidence['errors'].append(str(error))
             if self.evidence['document']['state'] == 'attempted':
@@ -211,8 +240,10 @@ class Verification:
                     self.evidence['errors'].append('integrity: ' + str(error))
         failed = bool(self.evidence['errors']) or self.evidence['document']['state'] != 'passed'
         self.evidence['status'] = 'failed' if failed else 'passed'
-        self.evidence['summary'] = ('Documentation-only verification failed; see evidence.' if failed else
-            'Documentation-only verification passed; assistant implementation/CI absent at baseline ' + BASELINE + '.')
+        self.evidence['summary'] = ('Repository verification failed; see evidence.' if failed else
+            ('Repository verification passed: document, Go, native recipe and hook checks.'
+             if self.evidence['application']['state'] == 'passed' else
+             'Documentation-only fixture verification passed.'))
         return self.evidence
 
 
