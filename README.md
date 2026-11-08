@@ -80,7 +80,7 @@ Candidate verification binds the exact tree and recipe content. After authorized
 publication, execute the resulting immutable selector through the same registered
 activity/model path and record its relationship to that candidate. Synthetic test
 selectors are not published releases. Corrected c2j remains pinned at
-`v0.0.117-0.20261101173540-e8cd4f8c68b1`; the model operation remains:
+`v0.0.122` with JobDB `v0.0.74` and Go 1.26; the model operation remains:
 
 ```
 git+https://github.com/colony-2/c2ops.git//pydantic@f30202d13d197beaed7ba0bd0b120b04443728eb

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"reflect"
 	"sort"
 	"strconv"
@@ -67,6 +68,8 @@ func (s *fixtureStory) RestartRecipeJob(ctx context.Context, r story.RestartReci
 }
 
 type fixtureControl struct {
+	list        func(jobdb.ListJobsRequest) ([]workflowctl.JobItem, string, error)
+	listCalls   int
 	backendPage int
 	runs        map[string]jobdb.GetJobRunResponse
 	workflowctl.WorkflowControl
@@ -107,8 +110,8 @@ func client(t *testing.T) (*Client, *fixtureStory, *fixtureControl, *fixtureSubm
 		if n != "cell" && n != "https://github.com/example/cell.git" {
 			return recipejob.ResolvedTarget{}, ErrForbidden
 		}
-		return recipejob.ResolvedTarget{RepositorySource: "https://github.com/example/cell.git", DefaultRef: "main"}, nil
-	}}, Config{Root: recipejob.ResolvedTarget{RepositorySource: "https://github.com/example/root.git", DefaultRef: "main"}, Recipe: selector, RecipeCommit: commit, CursorKey: []byte(strings.Repeat("secret", 8))})
+		return recipejob.ResolvedTarget{CellName: "cell", RepositorySource: "https://github.com/example/cell.git", DefaultRef: "main"}, nil
+	}}, Config{Root: recipejob.ResolvedTarget{CellName: "root", RepositorySource: "https://github.com/example/root.git", DefaultRef: "main"}, Recipe: selector, RecipeCommit: commit, CursorKey: []byte(strings.Repeat("secret", 8))})
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -415,7 +418,7 @@ func TestPreparePersistsExactReceiptAndStableDestination(t *testing.T) {
 	c, ss, _, sub := client(t)
 	s := fixture(c)
 	r := result("response", 2)
-	r.Response = &Response{Proposal: &Proposal{ID: "p", Hash: "h", Target: recipejob.ResolvedTarget{RepositorySource: "https://github.com/example/cell.git", DefaultRef: "main"}, Prompt: "exact"}}
+	r.Response = &Response{Proposal: &Proposal{ID: "p", Hash: "h", Target: recipejob.ResolvedTarget{CellName: "cell", RepositorySource: "https://github.com/example/cell.git", DefaultRef: "main"}, Prompt: "exact"}}
 	s.Root.Children = []*story.JobRunStoryNode{node("response", 2, r), inputNode(3, Command{Command: "confirm", ProposalID: "p", ProposalHash: "h"})}
 	ss.jobs["job"] = s
 	a, e := c.Prepare(ctx, human, "job")
@@ -473,12 +476,16 @@ func TestMissingReplayFailsExplicitly(t *testing.T) {
 }
 
 func (c *fixtureControl) ListJobs(ctx context.Context, req jobdb.ListJobsRequest) ([]workflowctl.JobItem, string, error) {
+	c.listCalls++
+	if c.list != nil {
+		return c.list(req)
+	}
 	out := []workflowctl.JobItem{}
 	for id := range c.story.jobs {
 		if len(req.JobKeys) > 0 && req.JobKeys[0].JobId != id {
 			continue
 		}
-		out = append(out, workflowctl.JobItem{JobSummary: jobdb.JobSummary{JobKey: jobdb.JobKey{TenantId: "tenant", JobId: id}, JobType: "recipe", Metadata: mustJSON(map[string]any{"repo": "https://github.com/example/root.git", "recipe": selector})}})
+		out = append(out, workflowctl.JobItem{JobSummary: jobdb.JobSummary{JobKey: jobdb.JobKey{TenantId: "tenant", JobId: id}, Cell: "root", CellRepo: "github.com/example/root", JobType: "recipe", Metadata: mustJSON(map[string]any{"repo": "https://github.com/example/root.git", "recipe": selector})}})
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].JobKey.JobId < out[j].JobKey.JobId })
 	if c.backendPage > 0 {
@@ -752,12 +759,12 @@ func TestDispatchPresentationRequiresRecordedSuccess(t *testing.T) {
 }
 
 func TestWorkerDispatchRejectionsRemainErrorsInForm(t *testing.T) {
-	for _, mode := range []string{"eligibility", "conflict"} {
+	for _, mode := range []string{"eligibility", "registration", "stale-confirmation", "conflict"} {
 		t.Run(mode, func(t *testing.T) {
 			c, ss, _, sub := client(t)
 			s := fixture(c)
 			response := result("response", 2)
-			response.Response = &Response{Proposal: &Proposal{ID: "p", Hash: "h", Target: recipejob.ResolvedTarget{RepositorySource: "https://github.com/example/cell.git", DefaultRef: "main"}, Prompt: "exact"}}
+			response.Response = &Response{Proposal: &Proposal{ID: "p", Hash: "h", Target: recipejob.ResolvedTarget{CellName: "cell", RepositorySource: "https://github.com/example/cell.git", DefaultRef: "main"}, Prompt: "exact"}}
 			s.Root.Children = []*story.JobRunStoryNode{node("response", 2, response), inputNode(3, Command{Command: "confirm", ProposalID: "p", ProposalHash: "h"})}
 			ss.jobs["job"] = s
 			prepared, err := c.Prepare(ctx, human, "job")
@@ -771,6 +778,12 @@ func TestWorkerDispatchRejectionsRemainErrorsInForm(t *testing.T) {
 				c.host.ResolveCell = func(context.Context, Caller, string) (recipejob.ResolvedTarget, error) {
 					return recipejob.ResolvedTarget{}, ErrForbidden
 				}
+			} else if mode == "registration" {
+				changed := response.Response.Proposal.Target
+				changed.CellName = "other"
+				c.host.ResolveCell = func(context.Context, Caller, string) (recipejob.ResolvedTarget, error) { return changed, nil }
+			} else if mode == "stale-confirmation" {
+				s.Root.Children[1] = inputNode(3, Command{Command: "confirm", ProposalID: "p", ProposalHash: "obsolete"})
 			} else {
 				// Existing job with another payload at the frozen destination is a conflict.
 				ss.jobs[prepared.Request.JobID] = fixture(c)
@@ -789,5 +802,133 @@ func TestWorkerDispatchRejectionsRemainErrorsInForm(t *testing.T) {
 				t.Fatal(request, err)
 			}
 		})
+	}
+}
+
+// Exercise backend rows, not only request construction: registration names can
+// be stale, repository transports differ, and filtered pages may be empty.
+func TestCanonicalRootIsolation(t *testing.T) {
+	for _, tc := range []struct {
+		name, tenant, cell, repo string
+		allowed                  bool
+	}{
+		{"canonical", "tenant", "root", "github.com/example/root", true},
+		{"https", "tenant", "root", "https://github.com/example/root.git", true},
+		{"ssh", "tenant", "root", "git@github.com:example/root.git", true},
+		{"other-repo", "tenant", "root", "github.com/example/other", false},
+		{"prefix", "tenant", "root", "github.com/example/root-extra", false},
+		{"other-cell", "tenant", "other", "github.com/example/root", false},
+		{"other-tenant", "other", "root", "github.com/example/root", false},
+		{"invalid-repo", "tenant", "root", "", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			c, ss, ctl, sub := client(t)
+			ss.jobs["job"] = fixture(c)
+			ctl.list = func(req jobdb.ListJobsRequest) ([]workflowctl.JobItem, string, error) {
+				return []workflowctl.JobItem{{JobSummary: jobdb.JobSummary{JobKey: jobdb.JobKey{TenantId: tc.tenant, JobId: "job"}, Cell: tc.cell, CellRepo: tc.repo, JobType: "recipe", Metadata: mustJSON(map[string]any{"recipe": selector})}}}, "", nil
+			}
+			ds, err := c.discover(ctx, human)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if (len(ds) == 1) != tc.allowed {
+				t.Fatalf("discovery: %d sessions", len(ds))
+			}
+			_, err = c.read(ctx, human, "job")
+			if tc.allowed && err != nil || !tc.allowed && !errors.Is(err, ErrNotFound) {
+				t.Fatalf("lookup: %v", err)
+			}
+			if !tc.allowed && ss.requests != 0 {
+				t.Fatal("read excluded session data")
+			}
+			if len(sub.jobs) != 0 {
+				t.Fatal("lookup submitted work")
+			}
+		})
+	}
+}
+
+func TestRootFilteredPagination(t *testing.T) {
+	for _, direct := range []bool{false, true} {
+		for _, repeat := range []bool{false, true} {
+			t.Run(fmt.Sprintf("direct=%v/repeat=%v", direct, repeat), func(t *testing.T) {
+				c, ss, ctl, _ := client(t)
+				ss.jobs["job"] = fixture(c)
+				ctl.list = func(req jobdb.ListJobsRequest) ([]workflowctl.JobItem, string, error) {
+					if req.PageToken == "" || repeat {
+						return []workflowctl.JobItem{{JobSummary: jobdb.JobSummary{JobKey: jobdb.JobKey{TenantId: "tenant", JobId: "excluded"}, Cell: "root", CellRepo: "github.com/example/other", JobType: "recipe", Metadata: mustJSON(map[string]any{"recipe": selector})}}}, "next", nil
+					}
+					return []workflowctl.JobItem{{JobSummary: jobdb.JobSummary{JobKey: jobdb.JobKey{TenantId: "tenant", JobId: "job"}, Cell: "root", CellRepo: "github.com/example/root", JobType: "recipe", Metadata: mustJSON(map[string]any{"recipe": selector})}}}, "", nil
+				}
+				var err error
+				if direct {
+					_, err = c.read(ctx, human, "job")
+				} else {
+					var ds []*replayData
+					ds, err = c.discover(ctx, human)
+					if !repeat && len(ds) != 1 {
+						t.Fatalf("lost session beyond filtered page: %d", len(ds))
+					}
+				}
+				if repeat && !errors.Is(err, ErrUnavailable) || !repeat && err != nil {
+					t.Fatal(err)
+				}
+			})
+		}
+	}
+}
+
+func TestRootTenantAuthorizationBeforeReads(t *testing.T) {
+	c, ss, ctl, sub := client(t)
+	ss.jobs["job"] = fixture(c)
+	other := human
+	other.TenantID = "other"
+	if _, err := c.List(ctx, other, PageRequest{}); !errors.Is(err, ErrForbidden) {
+		t.Fatal(err)
+	}
+	if _, err := c.read(ctx, other, "job"); !errors.Is(err, ErrForbidden) {
+		t.Fatal(err)
+	}
+	if ss.requests != 0 || ctl.listCalls != 0 || len(sub.jobs) != 0 {
+		t.Fatal("cross-tenant access reached backend")
+	}
+}
+
+func TestDiscoveryExcludesOtherRootWithSameSession(t *testing.T) {
+	c, ss, ctl, _ := client(t)
+	ss.jobs["job"] = fixture(c)
+	other := fixture(c) // Same logical session; unrelated root must not conflict.
+	other.JobID = "other-job"
+	ss.jobs["other-job"] = other
+	ctl.list = func(req jobdb.ListJobsRequest) ([]workflowctl.JobItem, string, error) {
+		var out []workflowctl.JobItem
+		for _, id := range []string{"job", "other-job"} {
+			if len(req.JobKeys) > 0 && req.JobKeys[0].JobId != id {
+				continue
+			}
+			repo := "github.com/example/root"
+			if id == "other-job" {
+				repo = "github.com/example/other"
+			}
+			out = append(out, workflowctl.JobItem{JobSummary: jobdb.JobSummary{JobKey: jobdb.JobKey{TenantId: "tenant", JobId: id}, Cell: "root", CellRepo: repo, JobType: "recipe", Metadata: mustJSON(map[string]any{"recipe": selector})}})
+		}
+		return out, "", nil
+	}
+	ds, err := c.discover(ctx, human)
+	if err != nil || len(ds) != 1 || ds[0].Story.JobID != "job" || ss.requests != 1 {
+		t.Fatalf("mixed configured roots: %+v %v reads=%d", ds, err, ss.requests)
+	}
+}
+
+func TestRecipeProtocolAndModelBinding(t *testing.T) {
+	raw, err := os.ReadFile("../session.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if Protocol != "cortex-assistant/2" || !strings.Contains(string(raw), "default_value: "+Protocol) {
+		t.Fatal("recipe protocol changed")
+	}
+	if strings.Count(string(raw), "op: "+ModelOperation+"\n") != 1 {
+		t.Fatal("recipe and facade model operation differ")
 	}
 }

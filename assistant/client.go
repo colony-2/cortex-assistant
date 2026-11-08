@@ -24,6 +24,18 @@ func New(h Host, cfg Config) (*Client, error) {
 	if h.Goals == nil || h.History == nil || h.Control == nil || h.Story == nil || h.Input == nil || h.Submitter == nil || h.Authorize == nil || h.ResolveCell == nil || cfg.Root.RepositorySource == "" || len(cfg.CursorKey) < 32 {
 		return nil, ErrInvalid
 	}
+	if err := jobdb.ValidateCellName(cfg.Root.CellName); err != nil {
+		return nil, fmt.Errorf("%w: registered root cell name", ErrInvalid)
+	}
+	rootRepo := cfg.Root.CellRepo
+	if rootRepo == "" {
+		rootRepo = cfg.Root.RepositorySource
+	}
+	canonical, err := jobdb.NormalizeCellRepo(rootRepo)
+	if err != nil {
+		return nil, fmt.Errorf("%w: canonical root repository", ErrInvalid)
+	}
+	cfg.Root.CellRepo = canonical
 	if !regexp.MustCompile(`^[a-f0-9]{40}$`).MatchString(cfg.RecipeCommit) || !strings.HasSuffix(cfg.Recipe, "@"+cfg.RecipeCommit) || !strings.Contains(cfg.Recipe, "cortex-assistant.git//session.yaml@") {
 		return nil, ErrInvalid
 	}
@@ -265,7 +277,7 @@ func (c *Client) Respond(ctx context.Context, w Caller, id string, in input.Stru
 		if e != nil {
 			return input.Output{}, e
 		}
-		if target.RepositorySource != req.Proposal.Target.RepositorySource || target.DefaultRef != req.Proposal.Target.DefaultRef {
+		if string(mustJSON(target)) != string(mustJSON(req.Proposal.Target)) {
 			return input.Output{}, ErrStale
 		}
 	}

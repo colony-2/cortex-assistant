@@ -44,12 +44,10 @@ github.com/cockroachdb/swiss v0.0.0-20260820225851-333444432258 h1:IJ+uNItEm0qx9
 github.com/cockroachdb/swiss v0.0.0-20260820225851-333444432258/go.mod h1:yBRu/cnL4ks9bgy4vAASdjIW+/xMlFwuHKqtmh3GZQg=
 github.com/cockroachdb/tokenbucket v0.0.0-20230807174530-cc333fc44b06 h1:zuQyyAKVxetITBuuhv3BI9cMrmStnpT18zmgmTxunpo=
 github.com/cockroachdb/tokenbucket v0.0.0-20230807174530-cc333fc44b06/go.mod h1:7nc4anLGjupUW/PeY5qiNYsdNXj7zopG+eqsS7To5IQ=
-github.com/colony-2/c2j v0.0.114 h1:EqzHjWRnmn9nQF2c+4SQkHa6c7MV12T+WuGltkfPW74=
-github.com/colony-2/c2j v0.0.114/go.mod h1:C6tJ8w/kcC33EqUQ8IOzS7N3eEad9US7fwpEh2NruEc=
-github.com/colony-2/c2j v0.0.117-0.20261101173540-e8cd4f8c68b1 h1:kwkUVtw8Mv6P1cpSVDqKk23BDELZSqOXUDT9cI86ByI=
-github.com/colony-2/c2j v0.0.117-0.20261101173540-e8cd4f8c68b1/go.mod h1:C6tJ8w/kcC33EqUQ8IOzS7N3eEad9US7fwpEh2NruEc=
-github.com/colony-2/jobdb v0.0.65-0.20261029235121-6d86c38fc234 h1:mtzPLsdYo8fpenss1QrRcRaot5IDCNTwT6aPZOVPUJE=
-github.com/colony-2/jobdb v0.0.65-0.20261029235121-6d86c38fc234/go.mod h1:45c4NbbKzZt8uRHgWUktOoGhsTkO8ogELlfxdqXJ4Ek=
+github.com/colony-2/c2j v0.0.122 h1:bSazSKN2ZFujXpdT4fTyaiYfNle4M4aRZqhfeNGNoog=
+github.com/colony-2/c2j v0.0.122/go.mod h1:ArpRC0hveVdrwGvYnp9ukPvPJbQ8dgpMuJrdGAZvN1s=
+github.com/colony-2/jobdb v0.0.74 h1:R3kFAEUBU+PN9FLbFcxq+nuzRoyXVeKnDmRz1mGn9KM=
+github.com/colony-2/jobdb v0.0.74/go.mod h1:45c4NbbKzZt8uRHgWUktOoGhsTkO8ogELlfxdqXJ4Ek=
 github.com/colony-2/strata-go v0.0.0-20260621025934-747fa0c819c0 h1:F1hn6GpewkXWOSkFurnN82j0nAwvCMRf5c16n5mE/iA=
 github.com/colony-2/strata-go v0.0.0-20260621025934-747fa0c819c0/go.mod h1:vOfXoxQXDy6oJjffySiFQJZR61VoMq89lzumVdWynkE=
 github.com/creack/pty v1.1.9/go.mod h1:oKZEueFk5CKHvIhNR5MUki03XCEU+Q6VDXinZuGJ33E=

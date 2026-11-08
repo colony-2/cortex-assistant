@@ -526,7 +526,13 @@ func (c *Client) Dispatch(ctx context.Context, w Caller, job string) (string, er
 		if err != nil {
 			return prepared.Request.JobID, err
 		}
-		if !ok || parsed.RecipeName != prepared.Request.Recipe || parsed.RepositorySource != prepared.Request.Target.RepositorySource || parsed.InputHash != recipejob.InputHash(prepared.Request.Inputs) {
+		targetRepo := prepared.Request.Target.CellRepo
+		if targetRepo == "" {
+			targetRepo = prepared.Request.Target.RepositorySource
+		}
+		targetRepo, targetErr := jobdb.NormalizeCellRepo(targetRepo)
+		rowRepo, rowErr := jobdb.NormalizeCellRepo(parsed.RepositorySource)
+		if !ok || targetErr != nil || rowErr != nil || parsed.TenantID != w.TenantID || parsed.CellName != prepared.Request.Target.CellName || parsed.RecipeName != prepared.Request.Recipe || rowRepo != targetRepo || parsed.InputHash != recipejob.InputHash(prepared.Request.Inputs) {
 			return prepared.Request.JobID, ErrConflict
 		}
 		exists = true

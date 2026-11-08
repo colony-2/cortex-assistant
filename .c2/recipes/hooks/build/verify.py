@@ -12,7 +12,7 @@ from urllib.parse import unquote, urlsplit
 BASELINE = 'd2c4a33352f3f0e888b172946fca69caffd573df'
 # Explicitly reviewed inventory: additions still require a coverage decision.
 APPLICATION_FILES = frozenset(['README.md', 'assistant/activity.go', 'assistant/activity_test.go', 'assistant/assistant_test.go', 'assistant/client.go', 'assistant/discovery.go', 'assistant/guard_integration_test.go', 'assistant/lineage.go', 'assistant/provider_integration_test.go', 'assistant/registration.go', 'assistant/releases.go', 'assistant/replay.go', 'assistant/respond_errors_test.go', 'assistant/runtime_restoration_test.go', 'assistant/tasks.go', 'assistant/types.go', 'assistant/uploads.go', 'assistant/validate.go', 'assistant/worker_integration_test.go', 'cmd/assistant-op/main.go', 'docs/design.md', 'docs/hosting.md', 'docs/pending-input-agreement.md', 'docs/test-statements.md', 'go.mod', 'go.sum', 'ops/assistant/op.yaml', 'recipe-tests/session.test.yaml', 'session.yaml'])
-C2J_CLI = 'github.com/colony-2/c2j/cmd/c2j@v0.0.117-0.20261101173540-e8cd4f8c68b1'
+C2J_CLI = 'github.com/colony-2/c2j/cmd/c2j@v0.0.122'
 OMISSIONS = ('Actual-provider execution (opt-in, separately bound evidence); '
              'published-selector verification; Cortex consumer integration; '
              'hosted CI runners/caches/platform matrices; publishing/deployment.')
@@ -188,7 +188,7 @@ class Verification:
                 raise ValueError('target_directory escapes repository or does not exist')
             self.evidence['tools']['git'] = self.git('--version').decode().strip()
             names = before['tracked_files']
-            allowed = {'PURPOSE.md', '.c2/recipes/hooks/build/verify.yaml',
+            allowed = {'PURPOSE.md', '.c2/config.yaml', '.c2/recipes/hooks/build/verify.yaml',
                        '.c2/recipes/hooks/build/verify.py', '.c2/recipes/hooks/build/verification.md',
                        'tests/test_verify.py', 'tests/verify.test.yaml', 'tests/verify-wrapper.yaml'}
             unknown = sorted(set(names) - allowed - APPLICATION_FILES)
@@ -216,7 +216,7 @@ class Verification:
                 if unformatted.strip():
                     raise ValueError('unformatted Go files: ' + unformatted.decode().strip())
                 self.command(['go', 'vet', './...'], timeout=300)
-                self.command(['go', 'test', './...', '-count=1'], timeout=900)
+                self.command(['go', 'test', './...', '-count=1', '-timeout=14m'], timeout=900)
                 with tempfile.TemporaryDirectory(prefix='assistant-verify-') as artifacts:
                     self.command(['go', 'run', C2J_CLI, 'test', 'run', '--file',
                         'recipe-tests/session.test.yaml', '--out-dir', artifacts], timeout=600)

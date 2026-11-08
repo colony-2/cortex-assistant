@@ -3,8 +3,8 @@ module github.com/colony-2/cortex-assistant
 go 1.26
 
 require (
-	github.com/colony-2/c2j v0.0.117-0.20261101173540-e8cd4f8c68b1
-	github.com/colony-2/jobdb v0.0.65-0.20261029235121-6d86c38fc234
+	github.com/colony-2/c2j v0.0.122
+	github.com/colony-2/jobdb v0.0.74
 	golang.org/x/oauth2 v0.36.0
 )
 

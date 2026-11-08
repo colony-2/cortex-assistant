@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/http/cgi"
 	"net/http/httptest"
 	"os"
 	"os/exec"
@@ -19,6 +20,7 @@ import (
 	"github.com/colony-2/c2j/pkg/artifacts"
 	"github.com/colony-2/c2j/pkg/execution"
 	"github.com/colony-2/c2j/pkg/executionruntime"
+	"github.com/colony-2/c2j/pkg/gitprofile"
 	"github.com/colony-2/c2j/pkg/input"
 	"github.com/colony-2/c2j/pkg/jobcontext"
 	"github.com/colony-2/c2j/pkg/jobdbschema"
@@ -33,6 +35,7 @@ import (
 	workerops "github.com/colony-2/c2j/pkg/worker/ops"
 	workerworkflow "github.com/colony-2/c2j/pkg/worker/workflow"
 	"github.com/colony-2/jobdb/pkg/jobdb"
+	"github.com/colony-2/jobdb/pkg/jobdb/celltest"
 	"github.com/colony-2/jobdb/pkg/jobdb/runtime/remote"
 	sqliteruntime "github.com/colony-2/jobdb/pkg/jobdb/runtime/sqlite"
 	toyruntime "github.com/colony-2/jobdb/pkg/jobdb/runtime/toy"
@@ -130,16 +133,8 @@ func runWorkerConversation(t *testing.T, backend string, goalCase bool) {
 	if e != nil {
 		t.Fatal(e)
 	}
-	repo := t.TempDir()
+	repo := registeredFixtureRepository(t)
 	t.Setenv("CORTEX_ASSISTANT_CONFIG", "")
-	// Disposable fixture repository only; the candidate repository is never committed.
-	for _, args := range [][]string{{"init", "-q", "-b", "main"}, {"config", "user.name", "Assistant Test"}, {"config", "user.email", "assistant@example.invalid"}, {"add", "."}, {"commit", "--allow-empty", "-q", "-m", "fixture"}} {
-		cmd := exec.Command("git", args...)
-		cmd.Dir = repo
-		if b, e := cmd.CombinedOutput(); e != nil {
-			t.Fatalf("fixture git: %v %s", e, b)
-		}
-	}
 	var rt jobdb.WorkflowRuntime = toyruntime.New()
 	if backend != "toy" {
 		runtimeConfig := sqliteruntime.Config{DBPath: filepath.Join(t.TempDir(), "jobs.db")}
@@ -148,19 +143,25 @@ func runWorkerConversation(t *testing.T, backend string, goalCase bool) {
 			// Use the existing deployment capacity setting, not a runtime change.
 			runtimeConfig.MaxChapterApplicationPayloadBytes = 4 << 20
 		}
-		db, err := sqliteruntime.NewFromConfig(context.Background(), runtimeConfig)
+		db, err := sqliteruntime.NewFromConfig(celltest.Context(context.Background()), runtimeConfig)
 		if err != nil {
 			t.Fatal(err)
 		}
 		t.Cleanup(func() {
-			if e := db.Close(context.Background()); e != nil {
+			if e := db.Close(celltest.Context(context.Background())); e != nil {
 				t.Error(e)
 			}
 		})
 		rt = db
 	}
+	configureFixtureGit(t, rt.(jobdb.ConfigurationAdmin), repo)
+	// Explicit fixture registration and authority; production still requires
+	// the host's authenticated registry permissions.
+	if _, err := rt.CreateCell(celltest.Context(context.Background()), jobdb.CreateCellRequest{TenantID: human.TenantID, Name: "root", Repo: "github.com/example/root"}); err != nil {
+		t.Fatal(err)
+	}
 	if backend == "remote" {
-		server := httptest.NewServer(remote.NewServer(rt))
+		server := httptest.NewServer(celltest.Handler(remote.NewServer(rt)))
 		t.Cleanup(server.Close)
 		sdk, err := remote.New(server.URL, server.Client())
 		if err != nil {
@@ -201,10 +202,10 @@ func runWorkerConversation(t *testing.T, backend string, goalCase bool) {
 		return nil
 	}, ResolveCell: func(context.Context, Caller, string) (recipejob.ResolvedTarget, error) {
 		if goalCase {
-			return recipejob.ResolvedTarget{RepositorySource: repo, DefaultRef: "main"}, nil
+			return recipejob.ResolvedTarget{CellName: "root", CellRepo: "github.com/example/root", RepositorySource: "https://github.com/example/root.git", DefaultRef: "main"}, nil
 		}
 		return recipejob.ResolvedTarget{}, ErrForbidden
-	}}, Config{Root: recipejob.ResolvedTarget{RepositorySource: repo, DefaultRef: "main"}, Recipe: selector, RecipeCommit: commit, CursorKey: []byte(strings.Repeat("key!", 8))})
+	}}, Config{Root: recipejob.ResolvedTarget{CellName: "root", CellRepo: "github.com/example/root", RepositorySource: "https://github.com/example/root.git", DefaultRef: "main"}, Recipe: selector, RecipeCommit: commit, CursorKey: []byte(strings.Repeat("key!", 8))})
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -288,9 +289,13 @@ func runWorkerConversation(t *testing.T, backend string, goalCase bool) {
 	}
 	duration := 2 * time.Minute
 	if large {
-		duration = 5 * time.Minute
+		// Retained SQLite replay of escaped, multi-page history is CPU intensive.
+		// The previous five-minute budget expired in the verification worker even
+		// though the same assertions passed locally. Keep the workload and all
+		// replay checks, allowing bounded headroom within the hook's suite budget.
+		duration = 10 * time.Minute
 	}
-	runctx, cancel := context.WithTimeout(context.Background(), duration)
+	runctx, cancel := context.WithTimeout(celltest.Context(context.Background()), duration)
 	defer cancel()
 	prompt := "hello"
 	if actualProvider {
@@ -340,7 +345,7 @@ func runWorkerConversation(t *testing.T, backend string, goalCase bool) {
 			}
 			time.Sleep(10 * time.Millisecond)
 		}
-		inspection, _ := ctl.InspectJob(context.Background(), jobdb.JobKey{TenantId: human.TenantID, JobId: job})
+		inspection, _ := ctl.InspectJob(celltest.Context(context.Background()), jobdb.JobKey{TenantId: human.TenantID, JobId: job})
 		t.Fatalf("input unavailable: %+v", inspection)
 		return nil
 	}
@@ -628,7 +633,7 @@ func runWorkerConversation(t *testing.T, backend string, goalCase bool) {
 	// Replace the worker engine and facade while retaining only runtime storage.
 	cancel()
 	<-done
-	runctx, cancel = context.WithTimeout(context.Background(), duration)
+	runctx, cancel = context.WithTimeout(celltest.Context(context.Background()), duration)
 	defer cancel()
 	replacement, err := jobworkflow.NewEngineBuilder().WithRuntime(scoped).WithWorkerTenantId(human.TenantID).BuildEngine()
 	if err != nil {
@@ -1061,6 +1066,45 @@ func exerciseWorkerMembership(t *testing.T, ctx context.Context, c *Client, firs
 	}{{human, first}, {peer, second}} {
 		current := waitInput(pair.session.JobID)
 		if _, err := c.Respond(ctx, pair.who, pair.session.ID, input.StructuredSubmission{RequestID: *current.Form.RequestId, SubmissionID: "own-close", Response: Command{Command: "finish"}}); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+// Create a disposable source checkout; durable cell identity remains portable.
+func registeredFixtureRepository(t *testing.T) string {
+	t.Helper()
+	repo := t.TempDir()
+	// Disposable fixture repository only; the candidate repository is never committed.
+	for _, args := range [][]string{{"init", "-q", "-b", "main"}, {"config", "user.name", "Assistant Test"}, {"config", "user.email", "assistant@example.invalid"}, {"add", "."}, {"commit", "--allow-empty", "-q", "-m", "fixture"}} {
+		cmd := exec.Command("git", args...)
+		cmd.Dir = repo
+		if b, e := cmd.CombinedOutput(); e != nil {
+			t.Fatalf("fixture git: %v %s", e, b)
+		}
+	}
+
+	return repo
+}
+
+// The worker intentionally isolates ambient Git configuration. Route fixture
+// identity through its supported tenant Git profile, backed by a local Git HTTP
+// server, rather than depending on private transport hooks or external network.
+func configureFixtureGit(t *testing.T, admin jobdb.ConfigurationAdmin, repo string) {
+	t.Helper()
+	export := t.TempDir()
+	if err := os.Symlink(filepath.Join(repo, ".git"), filepath.Join(export, "root.git")); err != nil {
+		t.Fatal(err)
+	}
+	git, err := exec.LookPath("git")
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewServer(&cgi.Handler{Path: git, Args: []string{"http-backend"}, Dir: export, Env: []string{"GIT_PROJECT_ROOT=" + export, "GIT_HTTP_EXPORT_ALL=1"}})
+	t.Cleanup(server.Close)
+	profile := gitprofile.Profile{Version: 1, Entries: []gitprofile.Entry{{URL: server.URL + "/root.git", RewriteFrom: []string{"https://github.com/example/root.git"}}}}
+	for name, value := range map[string]any{gitprofile.ReadOnlyKey: "fixture", gitprofile.ProfilePrefix + "fixture": profile} {
+		if _, err := admin.SetTenantConfigurationValue(celltest.Context(context.Background()), jobdb.SetTenantConfigurationValueRequest{TenantID: "tenant", Name: name, Value: mustJSON(value)}); err != nil {
 			t.Fatal(err)
 		}
 	}

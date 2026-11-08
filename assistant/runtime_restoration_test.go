@@ -3,6 +3,7 @@ package assistant_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"reflect"
 	"strings"
 	"testing"
@@ -77,3 +78,29 @@ func TestPendingInputRestoration(t *testing.T) {
 	}
 }
 func mustJSON(v any) []byte { b, _ := json.Marshal(v); return b }
+
+func TestPendingInputRestorationUnavailable(t *testing.T) {
+	data, err := workerops.NewInvocationTaskData(workerops.ActivityInvocationRequest{Input: map[string]any{"request_id": "frozen", "request": strings.Repeat("<", 64<<10)}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, err := data.GetData()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var envelope workerops.ActivityInvocationRequest
+	if err := json.Unmarshal(raw, &envelope); err != nil || envelope.InputArtifact == "" {
+		t.Fatalf("expected offload: %v", err)
+	}
+	// Retain the recorded envelope while making its referenced input unavailable.
+	runtime, err := input.NewRuntime(control{task: handle{data: jobdb.NewTaskDataOrPanic(envelope)}}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := runtime.GetDetails(context.Background(), "tenant", "job"); !errors.Is(err, input.ErrStorage) || !strings.Contains(err.Error(), "restore pending input") {
+		t.Fatalf("GetDetails silently lost restoration: %v", err)
+	}
+	if _, err := runtime.GetForm(context.Background(), "tenant", "job"); !errors.Is(err, input.ErrStorage) {
+		t.Fatalf("GetForm silently lost restoration: %v", err)
+	}
+}

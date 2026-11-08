@@ -3,6 +3,15 @@
 The module exports `NewActivity(client, ActivityOptions)` and
 `RegisterActivity(registry, activity)`. Construct Client from the host's existing
 Goals, History, Control, Story, Input, Submitter, authorization and target resolver.
+Configure `Config.Root` with the registered `CellName` and canonical `CellRepo`
+(repository assertions use JobDB normalization). `RepositorySource` supplies the
+Git execution source; when `CellRepo` is omitted it must itself normalize to a
+portable repository identity. Discovery filters by registered cell name and
+checks each row's tenant and canonical repository before reading session data.
+The host supplies registry authority for its existing JobDB runtime; the facade
+does not provision cells or grant registry permissions. Catalog targets used for
+confirmed dispatch must likewise contain their registered `CellName`.
+
 Options supply trusted provider/model names and execution authorization. No second
 remote connection, configuration file or runtime is created by the activity.
 

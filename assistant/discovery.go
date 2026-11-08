@@ -21,7 +21,36 @@ func (l controlLister) ListJobs(ctx context.Context, req jobdb.ListJobsRequest) 
 	return out, err
 }
 func (c *Client) rootJobs(ctx context.Context, w Caller, ids []string, token string) (recipejob.ListRecipeJobsResponse, error) {
-	return recipejob.ListRecipeJobs(ctx, controlLister{c.host.Control}, recipejob.ListRecipeJobsRequest{TenantID: w.TenantID, RepositorySource: c.cfg.Root.RepositorySource, JobIDs: ids, PageSize: 100, PageToken: token})
+	// Cell names select registered targets; canonical repository identity also
+	// guards against a stale or mismatched registration. Preserve page tokens
+	// even when every row on a page is filtered out.
+
+	var out recipejob.ListRecipeJobsResponse
+	seen := map[string]bool{}
+	for {
+		rows, err := recipejob.ListRecipeJobs(ctx, controlLister{c.host.Control}, recipejob.ListRecipeJobsRequest{TenantID: w.TenantID, CellNames: []string{c.cfg.Root.CellName}, JobIDs: ids, PageSize: 100, PageToken: token})
+		if err != nil {
+			return out, err
+		}
+		for _, row := range rows.Jobs {
+			repo, err := jobdb.NormalizeCellRepo(row.RepositorySource)
+			if err == nil && row.TenantID == w.TenantID && row.CellName == c.cfg.Root.CellName && repo == c.cfg.Root.CellRepo {
+				out.Jobs = append(out.Jobs, row)
+			}
+		}
+		out.NextPageToken = rows.NextPageToken
+		// Direct lookups must also traverse empty filtered pages before deciding
+		// that a session is absent. Discovery groups all pages itself.
+		if len(ids) == 0 || rows.NextPageToken == "" {
+			return out, nil
+		}
+		if seen[rows.NextPageToken] {
+			return out, ErrUnavailable
+		}
+		seen[rows.NextPageToken] = true
+		token = rows.NextPageToken
+	}
+
 }
 
 // Discovery exhausts backend pages before grouping executions. A session cannot
