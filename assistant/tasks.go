@@ -152,6 +152,7 @@ func (c *Client) Prompt(ctx context.Context, w Caller, job string) (string, []Lo
 	if e != nil {
 		return "", nil, e
 	}
+	c = c.forExecution(d)
 	if d.Capture == nil {
 		return "", nil, ErrUnavailable
 	}
@@ -286,6 +287,11 @@ func (c *Client) authorizedArtifacts(d *replayData) map[string]Artifact {
 // ValidateResponse returns this turn's output and requested document bytes. The
 // worker attaches documents, and replay binds their actual persisted keys.
 func (c *Client) ValidateResponse(ctx context.Context, w Caller, job string, origin Locator, model ModelOutput) (Response, []Document, error) {
+	d, e := c.read(ctx, w, job)
+	if e != nil {
+		return Response{}, nil, e
+	}
+	c = c.forExecution(d)
 	// Worst-case JSON escaping must not reject otherwise supported documents.
 	documentBytes := c.cfg.Limits.Count * c.cfg.Limits.Document
 	if documentBytes > c.cfg.Limits.Aggregate {
@@ -324,10 +330,6 @@ func (c *Client) ValidateResponse(ctx context.Context, w Caller, job string, ori
 	}
 	if len(m.Documents)+len(m.ReturnArtifactIDs) > c.cfg.Limits.Count {
 		return Response{}, nil, ErrLimit
-	}
-	d, e := c.read(ctx, w, job)
-	if e != nil {
-		return Response{}, nil, e
 	}
 	allowed := c.authorizedArtifacts(d)
 	result := Response{Text: m.Text, Model: model.Model, Usage: model.Usage}
@@ -416,6 +418,7 @@ func (c *Client) Form(ctx context.Context, w Caller, job string) (input.Config, 
 	if e != nil {
 		return input.Config{}, e
 	}
+	c = c.forExecution(d)
 	r := c.latestResponse(d)
 	req := PromptRequest{Protocol: d.Args.Protocol, SessionID: d.Args.SessionID, Replay: Locator{JobID: job}, Assistant: r, Proposal: r.Proposal}
 	return input.Config{Request: req, ResponseSchema: c.ResponseSchema(r.Proposal), Presentation: map[string]any{"type": "cortex-assistant", "close_available": true}}, nil
@@ -425,6 +428,7 @@ func (c *Client) Accept(ctx context.Context, w Caller, job string) (Command, *in
 	if e != nil {
 		return Command{}, nil, e
 	}
+	c = c.forExecution(d)
 	var accepted *Entry
 	for i := len(d.Entries) - 1; i >= 0; i-- {
 		if d.Entries[i].Receipt != nil {

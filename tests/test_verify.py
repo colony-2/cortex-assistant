@@ -1,4 +1,6 @@
 """Approved document and runtime expectations; all mutations use disposable fixtures."""
+from contextlib import contextmanager
+import base64
 import importlib.util
 import json
 import os
@@ -201,6 +203,22 @@ class Runtime(unittest.TestCase):
                 self.assertIn('recognizable', run.logs[-1]['stdout'])
                 self.assertIn('error', run.logs[-1]['stderr'])
 
+    def test_failed_and_timed_out_go_logs_remain_individual_artifacts(self):
+        directory = Path(self.temp.name) / 'tools'
+        directory.mkdir()
+        executable = directory / 'go'
+        artifacts = Path(self.temp.name) / 'artifacts'
+        artifacts.mkdir()
+        for suffix, timeout in (('exit 37', 2), ('/bin/sleep 2', .05)):
+            executable.write_text("#!/bin/sh\nprintf 'event\\n'\nprintf 'diagnostic\\n' >&2\n" + suffix + '\n')
+            executable.chmod(0o755)
+            run = v.Verification(self.root, self.head, artifacts=artifacts)
+            run.command_env['PATH'] = str(directory)
+            with self.assertRaises(RuntimeError):
+                run.command(['go', 'test'], timeout=timeout)
+            self.assertIn('event', (artifacts / 'go-test.jsonl').read_text())
+            self.assertIn('diagnostic', (artifacts / 'go-test.stderr').read_text())
+
     def test_mutations_detected_without_repair(self):
         for kind in ('head', 'index', 'tracked'):
             with self.subTest(kind=kind):
@@ -281,6 +299,9 @@ class Runtime(unittest.TestCase):
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text('fixture\n')
         subprocess.run(['git', '-C', str(self.root), 'add', '.'], check=True)
+        subprocess.run(['git', '-C', str(self.root), '-c', 'user.name=Verifier', '-c',
+                        'user.email=verify@example.invalid', 'commit', '-qm', 'complete fixture'], check=True)
+        self.head = subprocess.check_output(['git', '-C', str(self.root), 'rev-parse', 'HEAD']).decode().strip()
 
     def test_application_mapping_requires_complete_inventory(self):
         (self.root / 'go.mod').write_text('module fixture\n')
@@ -291,7 +312,7 @@ class Runtime(unittest.TestCase):
 
     def test_application_checks_and_failure_propagation(self):
         self.application_fixture()
-        for failure in (None, 'gofmt', 'vet', 'test', 'native', 'hook', 'missing-go'):
+        for failure in (None, 'gofmt', 'vet', 'test', 'native', 'include', 'hook', 'missing-go', 'untracked'):
             with self.subTest(failure=failure):
                 run = self.runner()
                 original = run.command
@@ -300,23 +321,199 @@ class Runtime(unittest.TestCase):
                     kind = None
                     if args[0] == 'gofmt': kind = 'gofmt'
                     elif args[0] == 'go':
-                        kind = {'version': 'missing-go', 'vet': 'vet', 'test': 'test', 'run': 'native'}[args[1]]
+                        kind = {'version': 'missing-go', 'vet': 'vet', 'test': 'test', 'run': 'native', 'list': 'modules'}[args[1]]
                     elif '-m' in args and 'unittest' in args: kind = 'hook'
+                    if kind == 'native' and 'validate' in args: kind = 'include'
                     if kind:
                         calls.append(kind)
+                        if failure == 'untracked' and kind == 'hook':
+                            (self.root / 'unexpected.go').write_text('new source')
                         if failure == kind:
                             if kind == 'gofmt': return b'assistant/client.go\n'
                             raise RuntimeError('injected ' + kind + ' failure')
-                        return b''
+                        return b'declared-secret-include valid' if kind == 'include' else b''
                     return original(args, timeout)
-                with patch.object(run, 'command', side_effect=command): result = run.run()
+                with patch.object(run, 'command', side_effect=command), \
+                     patch.object(run, 'candidate_environment') as candidate, \
+                     patch.object(run, 'validate_cases'), patch.object(run, 'validate_native'):
+                    candidate.return_value.__enter__.return_value = {'tree': 'fixture'}
+                    result = run.run()
                 self.assertEqual(result['status'], 'passed' if failure is None else 'failed', result)
                 self.assertEqual(result['before'], result['after'])
                 if failure is None:
-                    self.assertEqual(calls, ['missing-go', 'gofmt', 'vet', 'test', 'native', 'hook'])
+                    self.assertEqual(calls, ['missing-go', 'gofmt', 'vet', 'test', 'modules', 'native', 'include', 'hook'])
                     self.assertEqual(result['application']['state'], 'passed')
+                elif failure == 'untracked':
+                    self.assertIn('untracked or modified source', result['errors'][-1])
+                    (self.root / 'unexpected.go').unlink()
                 else:
                     self.assertNotEqual(result['application']['state'], 'passed')
+
+
+class Candidates(unittest.TestCase):
+    setUp = Runtime.setUp
+    runner = Runtime.runner
+
+    def test_exact_commit_full_tree_mirror_and_integrity(self):
+        artifacts = Path(self.temp.name) / 'evidence'
+        artifacts.mkdir()
+        run = self.runner()
+        before = run.snapshot()
+        with run.candidate_environment(artifacts) as source:
+            self.assertEqual(source['commit'], self.head)
+            self.assertEqual(source, run.evidence['candidate_source']['mirror'])
+            checkout = Path(run.command_env['ASSISTANT_VERIFY_CHECKOUT'])
+            self.assertEqual((checkout / 'PURPOSE.md').read_bytes(), (self.root / 'PURPOSE.md').read_bytes())
+            self.assertFalse(run.evidence['candidate_source']['synthetic_commit'])
+        self.assertEqual(run.snapshot(), before)
+        self.assertNotIn('ASSISTANT_VERIFY_CANDIDATE', run.command_env)
+        self.assertTrue(all(VALID not in entry.get('stdout', '') for entry in run.logs))
+        self.assertTrue(any(entry.get('blob_sha256') for entry in run.logs))
+
+    def test_shallow_mirror_keeps_unpublished_candidate_identity(self):
+        subprocess.run(['git', '-C', str(self.root), '-c', 'user.name=Verifier', '-c',
+                        'user.email=verify@example.invalid', 'commit', '--allow-empty', '-qm', 'parent'], check=True)
+        shallow = Path(self.temp.name) / 'shallow'
+        subprocess.run(['git', 'clone', '-q', '--depth=1', self.root.as_uri(), str(shallow)], check=True)
+        (shallow / 'unpublished.md').write_text('unpublished candidate fixture')
+        subprocess.run(['git', '-C', str(shallow), 'add', '.'], check=True)
+        subprocess.run(['git', '-C', str(shallow), '-c', 'user.name=Verifier', '-c',
+                        'user.email=verify@example.invalid', 'commit', '-qm', 'unpublished fixture'], check=True)
+        candidate = subprocess.check_output(['git', '-C', str(shallow), 'rev-parse', 'HEAD']).decode().strip()
+        artifacts = Path(self.temp.name) / 'evidence'
+        artifacts.mkdir()
+        run = v.Verification(shallow, candidate)
+        with run.candidate_environment(artifacts) as source:
+            self.assertEqual(source['commit'], candidate)
+            self.assertEqual(source, run.evidence['candidate_source']['mirror'])
+            self.assertEqual(subprocess.check_output(['git', '-C', run.command_env['ASSISTANT_VERIFY_MIRROR'],
+                             'rev-parse', '--is-shallow-repository']).strip(), b'false')
+        self.assertEqual(subprocess.check_output(['git', '-C', str(shallow), 'rev-parse',
+                         '--is-shallow-repository']).strip(), b'true')
+
+    def test_wrong_bytes_index_and_post_execution_mutation(self):
+        artifacts = Path(self.temp.name) / 'evidence'
+        artifacts.mkdir()
+        (self.root / 'PURPOSE.md').write_text('uncommitted')
+        with self.assertRaisesRegex(ValueError, 'bytes mismatch'):
+            with self.runner().candidate_environment(artifacts):
+                self.fail('dirty source admitted')
+        (self.root / 'PURPOSE.md').write_text(VALID)
+        # Same content with executable mismatch is also a different candidate.
+        (self.root / 'PURPOSE.md').chmod(0o755)
+        with self.assertRaisesRegex(ValueError, 'mode mismatch'):
+            with self.runner().candidate_environment(artifacts):
+                self.fail('mode mismatch admitted')
+        (self.root / 'PURPOSE.md').chmod(0o644)
+        (self.root / 'new').write_text('new staged source')
+        subprocess.run(['git', '-C', str(self.root), 'add', 'new'], check=True)
+        with self.assertRaisesRegex(ValueError, 'index or working tree'):
+            with self.runner().candidate_environment(artifacts):
+                self.fail('staged addition admitted')
+        subprocess.run(['git', '-C', str(self.root), 'reset', '-q', 'HEAD', 'new'], check=True)
+        (self.root / 'new').unlink()
+        run = self.runner()
+        with self.assertRaisesRegex(ValueError, 'bytes mismatch'):
+            with run.candidate_environment(artifacts):
+                checkout = Path(run.command_env['ASSISTANT_VERIFY_CHECKOUT'])
+                (checkout / 'PURPOSE.md').write_text('mutation')
+
+    def test_required_native_missing_skips_and_failures(self):
+        artifacts = Path(self.temp.name) / 'native'
+        artifacts.mkdir()
+        run = self.runner()
+        expected = ['finish-reaches-success-without-followup-model', 'invalid-then-finish',
+                    'confirm-then-finish', 'send-then-finish']
+        summary = {'cases': 4, 'results': [dict(case_id=name, status='passed') for name in expected]}
+        path = artifacts / 'summary.json'
+        with self.assertRaises(FileNotFoundError):
+            run.validate_native(artifacts)
+        path.write_text(json.dumps(summary))
+        run.validate_native(artifacts)
+        for status in ('failed', 'skipped'):
+            summary['results'][0]['status'] = status
+            path.write_text(json.dumps(summary))
+            with self.assertRaises(ValueError):
+                run.validate_native(artifacts)
+        summary['results'].pop()
+        path.write_text(json.dumps(summary))
+        with self.assertRaises(ValueError):
+            run.validate_native(artifacts)
+
+    def case_fixture(self):
+        artifacts = Path(self.temp.name) / 'cases-evidence'
+        artifacts.mkdir(exist_ok=True)
+        tree = 'candidate-tree'
+        for test, mode in v.ORDINARY_CASES.items():
+            directory = artifacts / 'cases' / test
+            directory.mkdir(parents=True, exist_ok=True)
+            case = {'test': test, 'mode': mode, 'outcome': 'passed', 'candidate': self.head,
+                    'tree': tree, 'canonical_sources': [{'source': {
+                        'resolved_commit': self.head,
+                        'submitted_selector': 'git+https://github.com/colony-2/cortex-assistant.git//discussion-goal.yaml@' + self.head},
+                        'recipe_artifact': 'resolved-recipe.yaml', 'recipe_sha256': v.hashlib.sha256(b'resolved').hexdigest()}],
+                    'requests': [{'model': 'fixture'}] if mode in v.POSITIVE_MODES else [],
+                    'package': {'sha256_before': v.PACKAGE_HASHES, 'sha256_after': v.PACKAGE_HASHES,
+                                'trusted_command_suffix': []}}
+            (directory / 'candidate.json').write_text(json.dumps(case))
+            for name in v.behavior_artifacts(mode):
+                (directory / name).write_text(json.dumps(dict(download_outcome='unavailable', replay_outcome='unavailable', reopen_outcome='unavailable')))
+            if mode == 'goal-retention':
+                case['inspection_phase'] = 'source/task inspection before intentional loss'
+                (directory / 'candidate.json').write_text(json.dumps(case))
+            (directory / 'resolved-recipe.yaml').write_bytes(b'resolved')
+            (directory / 'initial-prompt.json').write_text(json.dumps({'assistant': {'text': 'provider grounded reply'}}))
+        contract = artifacts / 'cases' / 'TestPinnedInferenceHTTPSConcurrencyAndDeadline'
+        contract.mkdir(parents=True, exist_ok=True)
+        (contract / 'inference-contract.json').write_text(json.dumps({
+            'candidate': self.head, 'overlapping_clients': 2, 'deadline_outcome': 'timeout',
+            'deadline_requests': 3, 'invocation_timeout_seconds': 2, 'deadline_from_first_request_ms': 1900,
+            'requests': [{}] * 5, 'results': [{'model': 'first'}, {'model': 'second'}],
+            'package': {'selector': v.INFERENCE, 'sha256_before': v.PACKAGE_HASHES, 'sha256_after': v.PACKAGE_HASHES}}))
+        events = [dict(Package='github.com/colony-2/cortex-assistant/assistant', Test=test, Action='pass')
+                  for test in set(v.ORDINARY_CASES) | v.COMPATIBILITY_CASES]
+        events += [dict(Package='github.com/colony-2/cortex-assistant/cmd/' + name, Action='skip')
+                   for name in ('assistant-op', 'discussion-op')]
+        return artifacts, {'tree': tree}, events
+
+    def test_required_cases_identity_requests_package_artifacts_and_skips(self):
+        run = self.runner()
+        artifacts, source, events = self.case_fixture()
+        def validate():
+            return run.validate_cases(('\n'.join(json.dumps(event) for event in events)).encode(), artifacts, source)
+        validate()
+        directory = artifacts / 'cases' / 'TestGoalSuccessfulProviderReopen'
+        path = directory / 'candidate.json'
+        original = json.loads(path.read_text())
+        for key, value in (('candidate', 'wrong'), ('tree', 'wrong'), ('outcome', 'failed'),
+                           ('requests', []), ('package', {}), ('canonical_sources', [])):
+            changed = dict(original, **{key: value})
+            path.write_text(json.dumps(changed))
+            with self.subTest(key=key), self.assertRaises(ValueError):
+                validate()
+        changed = json.loads(json.dumps(original))
+        changed['package']['sha256_after']['bin/pydantic'] = 'modified'
+        path.write_text(json.dumps(changed))
+        with self.assertRaisesRegex(ValueError, 'inference mutated'):
+            validate()
+        path.write_text(json.dumps(original))
+        (directory / 'initial-prompt.json').write_text(json.dumps({'assistant': {'text': '', 'error': 'caught provider error'}}))
+        with self.assertRaisesRegex(ValueError, 'validated response'):
+            validate()
+        (directory / 'initial-prompt.json').write_text(json.dumps({'assistant': {'text': 'provider grounded reply'}}))
+        path.unlink()
+        with self.assertRaises(FileNotFoundError):
+            validate()
+        path.write_text(json.dumps(original))
+        events[0]['Action'] = 'skip'
+        with self.assertRaisesRegex(ValueError, 'failed/skipped'):
+            validate()
+        events[0]['Action'] = 'fail'
+        with self.assertRaisesRegex(ValueError, 'failed/skipped'):
+            validate()
+        events.pop(0)
+        with self.assertRaisesRegex(ValueError, 'missing required Go pass'):
+            validate()
 
 
 
@@ -330,6 +527,18 @@ class WrapperIntegration(unittest.TestCase):
                             'https://github.com/colony-2/recipes.git', str(source)], check=True)
             subprocess.run(['git', '-C', str(source), 'checkout', '-q', '--detach', revision], check=True)
             template = (ROOT / 'tests/verify-wrapper.yaml').read_text()
+            # Recipe artifact bindings are a literal map, not a template for
+            # the entire map. Bind every stress file to its catalog reference.
+            bindings = []
+            for i in range(148):
+                name = 'evidence-%03d.json' % i
+                query = ('{"kind":"stored", "name":"' + name + '", "stored":{"key":'
+                    '(.producer + {"name":"' + name + '", "sizeBytes":.sizes["' + name + '"]})}}')
+                expression = ("${{ inputs.stress ? jq(json_parse(sequence.read_catalog.outputs.stdout), " + repr(query) +
+                    ") : sequence.actual_wrapper.outputs.artifact_refs['hooks/verify/0/verification-evidence.json'] }}")
+                bindings.append('    ' + name + ': ' + json.dumps(expression))
+            bindings = '\n'.join(bindings)
+            template = template.replace('    # Stress fixture bindings are inserted here by test_verify.py.', bindings)
             (source / 'verify-wrapper.yaml').write_text(template)
             files = {name: (ROOT / name).read_text() for name in (
                 '.c2/recipes/hooks/build/verify.yaml', '.c2/recipes/hooks/build/verify.py',
@@ -344,11 +553,31 @@ class WrapperIntegration(unittest.TestCase):
                 ('email-autolink', VALID + '<user@example.com>', 'failed', False, 'unsupported'),
                 ('closing-title', '# Useful title ###\n\nUseful prose.\n', 'passed', True, ''),
                 ('supported-links', VALID + '[label](PURPOSE.md) ![image](PURPOSE.md)', 'passed', True, ''),
+                ('many-artifacts', VALID, 'passed', True, ''),
+                ('many-artifacts-failed', '# Title only\n', 'failed', False, 'prose'),
             )
             for name, document, status, allowed, diagnostic in scenarios:
+                fixture_files = dict(files, **{'PURPOSE.md': document})
+                if name.startswith('many-artifacts'):
+                    # Exercise the real hook schema with >64 stored files.
+                    # Reserved names are supplied at the export expression:
+                    # applications cannot write runtime bookkeeping to outbox.
+                    fixture_files['.c2/recipes/hooks/build/verify.py'] = files[
+                        '.c2/recipes/hooks/build/verify.py'].replace(
+                            "    run = Verification(os.environ['WORKTREE']",
+                            "    for i in range(148):\n"
+                            "        (outbox / ('evidence-%03d.json' % i)).write_text(json.dumps({'case': i}))\n"
+                            "    run = Verification(os.environ['WORKTREE']")
+                    fixture_files['.c2/recipes/hooks/build/verify.yaml'] = files[
+                        '.c2/recipes/hooks/build/verify.yaml'].replace(
+                            'jq(sequence.verify.artifacts,',
+                            'jq(jq(sequence.verify.artifacts, \' . + {'
+                            '"__git_state_thin_pack__": .["verification-evidence.json"], '
+                            '"diff_from_parent.diff": .["verification-evidence.json"], '
+                            '"diff_from_base.diff": .["verification-evidence.json"]}\'),')
                 cases.append({'id': name, 'type': 'integration_case',
-                    'runtime': {'cells': {'root': {'files': dict(files, **{'PURPOSE.md': document})}}},
-                    'inputs': {}, 'mocks': {'ops': [{'repeat': True,
+                    'runtime': {'cells': {'root': {'files': fixture_files}}},
+                    'inputs': {'stress': name.startswith('many-artifacts')}, 'mocks': {'ops': [{'repeat': True,
                     'match': {'op': 'command_execution'}, 'behavior': {'mode': 'passthrough'}}]},
                     'assertions': [{'type': 'output_equals', 'path': 'result.status', 'value': status},
                         {'type': 'output_equals', 'path': 'allowed', 'value': allowed},
@@ -360,6 +589,15 @@ class WrapperIntegration(unittest.TestCase):
                        '--artifact-mode', 'inline', '--artifact-max-bytes', '200000',
                        '--out-dir', str(output)]
             process = subprocess.run(command, capture_output=True, text=True, timeout=300)
+            # Keep the original wrapper evidence even if a later assertion fails.
+            if os.environ.get('VERIFY_TEST_EVIDENCE'):
+                retained = Path(os.environ['VERIFY_TEST_EVIDENCE'])
+                retained.mkdir(parents=True, exist_ok=True)
+                (retained / 'command.json').write_text(json.dumps({
+                    'args': command, 'exit_code': process.returncode,
+                    'stdout': process.stdout, 'stderr': process.stderr}, indent=2) + '\n')
+                if output.exists():
+                    shutil.copytree(output, retained, dirs_exist_ok=True)
             self.assertEqual(process.returncode, 0, process.stdout + process.stderr)
             for name, document, expected, allowed, diagnostic in scenarios:
                 result = json.loads((output / 'cases' / name / 'result.json').read_text())
@@ -369,6 +607,30 @@ class WrapperIntegration(unittest.TestCase):
                 self.assertEqual(run['outputs']['allowed'], expected == 'passed')
                 calls = run['runtime']['calls']
                 artifacts = {key: value for call in calls for key, value in call.get('artifacts', {}).items()}
+                refs = run['outputs']['artifact_refs']
+                self.assertLessEqual(len(refs), 64)
+                reserved = {'__git_state_thin_pack__', 'diff_from_parent.diff', 'diff_from_base.diff'}
+                self.assertFalse(reserved & {Path(key).name for key in refs})
+                # The real shared wrapper prefixes and materializes value refs.
+                catalog_key = 'hooks/verify/0/artifact-catalog.json'
+                self.assertEqual(refs[catalog_key]['kind'], 'attached')
+                catalog_refs = json.loads(artifacts[catalog_key])
+                self.assertFalse(reserved & catalog_refs.keys())
+                self.assertEqual(refs['hooks/verify/0/verification-evidence.json']['stored'],
+                                 catalog_refs['verification-evidence.json']['stored'])
+                if name.startswith('many-artifacts'):
+                    downloaded = json.loads(base64.b64decode(
+                        run['artifacts']['downloaded-evidence.json']['content_base64']))
+                    self.assertEqual(len(refs), 3)  # two hook refs plus wrapper report
+                    self.assertEqual(sum(key.startswith('evidence-') for key in catalog_refs), 148)
+                    self.assertEqual(len(downloaded), 149)
+                    for key, item in downloaded.items():
+                        self.assertEqual(item['size'], catalog_refs[key]['stored']['key']['sizeBytes'])
+                    for i in range(148):
+                        key = 'evidence-%03d.json' % i
+                        self.assertEqual(catalog_refs[key]['kind'], 'stored')
+                        self.assertEqual(catalog_refs[key]['stored']['key']['name'], key)
+                        self.assertEqual(downloaded[key]['value'], {'case': i})
                 evidence = json.loads(artifacts['hooks/verify/0/verification-evidence.json'])
                 self.assertEqual(evidence['status'], expected)
                 self.assertEqual(evidence['before'], evidence['after'])
@@ -385,9 +647,6 @@ class WrapperIntegration(unittest.TestCase):
                     self.assertEqual(evidence['document']['local_links_checked'], 2)
                     self.assertEqual(evidence['document']['unsupported_forms'], [])
                 self.assertTrue(run['runtime']['repositories']['root']['clean'])
-            # Preserve exact local runtime evidence when requested by the caller.
-            if os.environ.get('VERIFY_TEST_EVIDENCE'):
-                shutil.copytree(output, os.environ['VERIFY_TEST_EVIDENCE'], dirs_exist_ok=True)
 
 
 if __name__ == '__main__':

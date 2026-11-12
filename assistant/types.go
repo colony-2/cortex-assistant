@@ -19,6 +19,10 @@ const Protocol = "cortex-assistant/2"
 const RecipeID = "cortex-assistant-session"
 const ModelOperation = "git+https://github.com/colony-2/c2ops.git//pydantic@f30202d13d197beaed7ba0bd0b120b04443728eb"
 
+// OrdinaryModelOperation is the delivered explicit-binding package. The frozen
+// v2 selector above remains unchanged for historical execution identities.
+const OrdinaryModelOperation = "nix:github:colony-2/c2ops/6396e1fe6462084e85ea44d86d372bdf3b133db0#pydantic"
+
 var (
 	ErrForbidden   = errors.New("assistant: forbidden")
 	ErrNotFound    = errors.New("assistant: not found")
@@ -72,7 +76,7 @@ type Host struct {
 	ResolveCell func(context.Context, Caller, string) (recipejob.ResolvedTarget, error)
 }
 
-// ReleaseDescriptor approves one immutable legacy execution format. Legacy
+// ReleaseDescriptor approves one immutable execution format. Legacy
 // histories remain readable; Reopen must only be enabled with its original route.
 type ReleaseDescriptor struct {
 	Recipe   string
@@ -81,6 +85,9 @@ type ReleaseDescriptor struct {
 	Reopen   bool
 }
 type Config struct {
+	// Protocol is explicit for new execution formats; empty preserves frozen v2.
+	Protocol       string
+	Bindings       *OrdinaryBindings
 	LegacyReleases []ReleaseDescriptor
 
 	Root   recipejob.ResolvedTarget
@@ -105,6 +112,7 @@ type Locator struct {
 	Task       int64    `json:"task"`
 	Invocation string   `json:"invocation,omitempty"`
 	Path       []string `json:"path,omitempty"`
+	Attempt    int      `json:"attempt,omitempty"`
 }
 type Artifact struct {
 	ID        string        `json:"id"`
@@ -126,6 +134,7 @@ type DocumentInfo struct {
 	Size int64  `json:"size"`
 }
 type Response struct {
+	Citations []string       `json:"citations,omitempty"`
 	Documents []DocumentInfo `json:"documents,omitempty"`
 	Text      string         `json:"text"`
 	Artifacts []Artifact     `json:"artifacts,omitempty"`
@@ -135,15 +144,19 @@ type Response struct {
 	Error     string         `json:"error,omitempty"`
 }
 type Entry struct {
-	Origin      Locator        `json:"origin"`
-	Role        string         `json:"role"`
-	Status      string         `json:"status"`
-	Text        string         `json:"text,omitempty"`
-	Artifacts   []Artifact     `json:"artifacts,omitempty"`
-	Proposal    *Proposal      `json:"proposal,omitempty"`
-	Receipt     *input.Receipt `json:"receipt,omitempty"`
-	Destination string         `json:"destination,omitempty"`
-	Error       string         `json:"error,omitempty"`
+	Citations       []string       `json:"citations,omitempty"`
+	Origin          Locator        `json:"origin"`
+	Role            string         `json:"role"`
+	Status          string         `json:"status"`
+	Text            string         `json:"text,omitempty"`
+	Artifacts       []Artifact     `json:"artifacts,omitempty"`
+	Proposal        *Proposal      `json:"proposal,omitempty"`
+	Receipt         *input.Receipt `json:"receipt,omitempty"`
+	Destination     string         `json:"destination,omitempty"`
+	DestinationGoal string         `json:"destination_goal,omitempty"`
+	// Recovery describes read-only discovery, never a replacement task outcome.
+	Recovery string `json:"recovery,omitempty"`
+	Error    string `json:"error,omitempty"`
 }
 type ReplayPage struct {
 	Entries   []Entry `json:"entries"`
@@ -153,6 +166,8 @@ type ReplayPage struct {
 	Watermark string  `json:"watermark"`
 }
 type Session struct {
+	Snapshot *FrozenSnapshot         `json:"snapshot,omitempty"`
+	Coverage map[string]string       `json:"coverage,omitempty"`
 	ID       string                  `json:"id"`
 	JobID    string                  `json:"job_id"`
 	GoalID   string                  `json:"goal_id"`

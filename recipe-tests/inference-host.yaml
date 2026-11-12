@@ -1,0 +1,13 @@
+id: assistant-binding-host
+schema_version: 2
+sequence:
+  - id: inference
+    include: ../inference.yaml
+    perms: {limit: {jobdb: {}}}
+    inputs:
+      base_url: https://fixture.invalid/exact/root
+      api_key: '${{ context.secrets.codex_api_key }}'
+      provider: openai
+      model: fixture
+      prompt: test
+      response_schema: {type: object, additionalProperties: false, properties: {text: {type: string}}, required: [text]}

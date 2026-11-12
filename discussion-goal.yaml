@@ -1,0 +1,132 @@
+id: cortex-assistant-session
+schema_version: 2
+version: "4.0.0"
+desc: A conversation is the custom view of this job's recorded task data.
+input_schema:
+  protocol: {type: string, default_value: cortex-assistant/4}
+  session_id: {type: string}
+  previous_job: {type: string, default_value: ""}
+  prior_job: {type: string, default_value: ""}
+  prompt: {type: string}
+  snapshot: {type: object, required: true}
+  base_url: {type: string, required: true}
+  api_key: {type: string, secret: true, required: true}
+  provider: {type: string, required: true}
+  model: {type: string, required: true}
+inputs:
+  protocol: '${{ inputs.protocol }}'
+  session_id: '${{ inputs.session_id }}'
+  previous_job: '${{ inputs.previous_job }}'
+  prior_job: '${{ inputs.prior_job }}'
+  prompt: '${{ inputs.prompt }}'
+  snapshot: '${{ inputs.snapshot }}'
+  base_url: '${{ inputs.base_url }}'
+  api_key: '${{ inputs.api_key }}'
+  provider: '${{ inputs.provider }}'
+  model: '${{ inputs.model }}'
+
+state:
+  initial: capture
+  states:
+    capture:
+      inputs:
+        prior_job: '${{ inputs.prior_job }}'
+        session_id: '${{ inputs.session_id }}'
+        prompt: '${{ inputs.prompt }}'
+        snapshot: '${{ inputs.snapshot }}'
+      sequence:
+        - id: capture
+          op: ./ops/discussion
+          inputs:
+            protocol: cortex-assistant/4
+            prior_job: '${{ inputs.prior_job }}'
+            action: capture
+            session_id: '${{ inputs.session_id }}'
+            prompt: '${{ inputs.prompt }}'
+            snapshot: '${{ inputs.snapshot }}'
+      transitions:
+        - to: prompt
+          when: 'inputs.previous_job != ""'
+        - to: infer
+          when: 'true'
+    infer:
+      inputs:
+        base_url: '${{ inputs.base_url }}'
+        api_key: '${{ inputs.api_key }}'
+        provider: '${{ inputs.provider }}'
+        model: '${{ inputs.model }}'
+      sequence:
+        - id: assemble
+          op: ./ops/discussion
+          inputs: {action: assemble, protocol: cortex-assistant/4}
+        - id: infer
+          include: ./inference.yaml
+          inputs:
+            base_url: '${{ inputs.base_url }}'
+            api_key: '${{ inputs.api_key }}'
+            provider: '${{ inputs.provider }}'
+            model: '${{ inputs.model }}'
+            prompt: '${{ sequence.assemble.outputs.model_input.prompt }}'
+            response_schema: '${{ sequence.assemble.outputs.model_input.response_schema }}'
+          catch:
+            - id: model-failure-to-input
+              when: 'true'
+              continue:
+                outputs:
+                  response: '{}'
+                  model: unavailable
+                  usage: {}
+        - id: response
+          op: ./ops/discussion
+          inputs:
+            protocol: cortex-assistant/4
+            action: response
+            model:
+              response: '${{ sequence.infer.outputs.response }}'
+              model: '${{ sequence.infer.outputs.model }}'
+              usage: '${{ sequence.infer.outputs.usage }}'
+      transitions:
+        - to: prompt
+          when: 'true'
+    prompt:
+      sequence:
+        - id: form
+          op: ./ops/discussion
+          inputs: {action: form, protocol: cortex-assistant/4}
+        - id: await-human
+          op: input
+          inputs:
+            form: '${{ sequence.form.outputs.form }}'
+        - id: accept
+          op: ./ops/discussion
+          inputs: {action: accept, protocol: cortex-assistant/4}
+      outputs:
+        command: '${{ sequence.accept.outputs.command.command }}'
+      transitions:
+        - to: infer
+          when: 'states.prompt.outputs.command == "send"'
+        - to: action
+          when: 'states.prompt.outputs.command == "confirm"'
+        - to: prompt
+          when: 'true'
+    action:
+      sequence:
+        - id: prepare-action
+          op: ./ops/discussion
+          inputs: {action: prepare-action, protocol: cortex-assistant/4}
+        - id: dispatch
+          op: recipes.run
+          inputs:
+            git_ref: '${{ sequence["prepare-action"].outputs.dispatch.git_ref }}'
+            recipes: '${{ sequence["prepare-action"].outputs.dispatch.recipes }}'
+        - id: dispatched
+          op: ./ops/discussion
+          inputs: {action: dispatched, protocol: cortex-assistant/4}
+      transitions:
+        - to: prompt
+          when: 'true'
+    done:
+      sequence: []
+outputs:
+  session_id: '${{ inputs.session_id }}'
+  status: finished

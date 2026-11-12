@@ -36,7 +36,33 @@ func New(h Host, cfg Config) (*Client, error) {
 		return nil, fmt.Errorf("%w: canonical root repository", ErrInvalid)
 	}
 	cfg.Root.CellRepo = canonical
-	if !regexp.MustCompile(`^[a-f0-9]{40}$`).MatchString(cfg.RecipeCommit) || !strings.HasSuffix(cfg.Recipe, "@"+cfg.RecipeCommit) || !strings.Contains(cfg.Recipe, "cortex-assistant.git//session.yaml@") {
+	if cfg.Protocol == "" {
+		cfg.Protocol = Protocol
+	}
+	recipeFile := "session.yaml"
+	if cfg.Protocol == GoalProtocol {
+		recipeFile = "discussion-goal.yaml"
+	} else if cfg.Protocol == OrdinaryProtocol {
+		recipeFile = "discussion.yaml"
+	} else if cfg.Protocol != Protocol {
+		return nil, ErrInvalid
+	}
+	if !regexp.MustCompile(`^[a-f0-9]{40}$`).MatchString(cfg.RecipeCommit) || cfg.Recipe != "git+https://github.com/colony-2/cortex-assistant.git//"+recipeFile+"@"+cfg.RecipeCommit {
+		return nil, ErrInvalid
+	}
+	if ordinaryProtocol(cfg.Protocol) {
+		if cfg.Bindings == nil || cfg.Bindings.validate() != nil {
+			return nil, ErrInvalid
+		}
+		bindings := *cfg.Bindings
+		cfg.Bindings = &bindings
+		if cfg.Limits == (Limits{}) {
+			cfg.Limits = OrdinaryLimits()
+		}
+		if !ordinaryLimitsValid(cfg.Limits) {
+			return nil, ErrLimit
+		}
+	} else if cfg.Bindings != nil {
 		return nil, ErrInvalid
 	}
 	if cfg.BuildRecipe == "" {
@@ -70,6 +96,9 @@ func (c *Client) authorize(ctx context.Context, w Caller, job string) error {
 	return nil
 }
 func (c *Client) Start(ctx context.Context, w Caller, in StartInput) (Session, error) {
+	if ordinaryProtocol(c.cfg.Protocol) {
+		return Session{}, fmt.Errorf("%w: use StartFrozen for the ordinary route", ErrInvalid)
+	}
 	if e := c.authorize(ctx, w, "start"); e != nil {
 		return Session{}, e
 	}
@@ -119,6 +148,20 @@ func (c *Client) Start(ctx context.Context, w Caller, in StartInput) (Session, e
 	return Session{ID: id, JobID: ref.JobID, GoalID: ref.GoalID, Status: "submitted", Source: in.Source, Limits: c.cfg.Limits}, nil
 }
 func (c *Client) resolve(ctx context.Context, w Caller, id string) (*replayData, error) {
+	// Goal-format sessions resolve eligible sequential candidates; legacy IDs
+	// retain their original execution/restart meaning.
+	if c.protocol() == GoalProtocol {
+		rows, err := c.discoverForGoal(ctx, w, id)
+		if err != nil {
+			return nil, err
+		}
+		if len(rows) == 1 {
+			return rows[0], nil
+		}
+		if len(rows) > 1 {
+			return nil, ErrConflict
+		}
+	}
 	// Logical session identity survives restart. A direct execution ID remains inspectable.
 	d, e := c.read(ctx, w, id)
 	if e != nil {
@@ -147,7 +190,8 @@ func (c *Client) Get(ctx context.Context, w Caller, id string) (Session, error) 
 	return c.session(ctx, w, d)
 }
 func (c *Client) session(ctx context.Context, w Caller, d *replayData) (Session, error) {
-	s := Session{ID: d.Args.SessionID, JobID: d.Story.JobID, GoalID: d.Story.GoalID, Status: string(d.Story.Status), Source: d.Args.Source, Limits: c.cfg.Limits}
+	c = c.forExecution(d)
+	s := Session{Snapshot: d.Snapshot, Coverage: d.Coverage, ID: d.Args.SessionID, JobID: d.Story.JobID, GoalID: d.Story.GoalID, Status: string(d.Story.Status), Source: d.Args.Source, Limits: c.cfg.Limits}
 	var e error
 	s.Replay, e = c.page(w, d, PageRequest{})
 	if e != nil {
@@ -224,6 +268,12 @@ func (c *Client) Respond(ctx context.Context, w Caller, id string, in input.Stru
 	if e != nil {
 		return input.Output{}, e
 	}
+	c = c.forExecution(d)
+	if ordinaryProtocol(d.Args.Protocol) {
+		if out, found, err := c.reconcileOrdinarySubmission(ctx, w, d, in); found {
+			return out, err
+		}
+	}
 	details, e := c.host.Input.GetDetails(ctx, w.TenantID, d.Story.JobID)
 	if e != nil {
 		if errors.Is(e, input.ErrInputNotPending) {
@@ -244,7 +294,7 @@ func (c *Client) Respond(ctx context.Context, w Caller, id string, in input.Stru
 	if e := decode(*details.Form.Request, &req); e != nil || req.Protocol != d.Args.Protocol || req.SessionID != d.Args.SessionID {
 		return input.Output{}, ErrForbidden
 	}
-	in, cmd, e := c.freezeSubmission(ctx, w, in, req.Proposal)
+	in, cmd, e := c.freezeSubmissionForProtocol(ctx, w, d.Args.Protocol, in, req.Proposal)
 	if e != nil {
 		return input.Output{}, e
 	}
@@ -273,11 +323,19 @@ func (c *Client) Respond(ctx context.Context, w Caller, id string, in input.Stru
 		return input.Output{}, e
 	}
 	if cmd.Command == "confirm" {
-		target, e := c.host.ResolveCell(ctx, w, req.Proposal.Target.RepositorySource)
+		selector := req.Proposal.Target.RepositorySource
+		if d.Args.Protocol == GoalProtocol {
+			selector = req.Proposal.Target.CellName
+		}
+		target, e := c.host.ResolveCell(ctx, w, selector)
 		if e != nil {
 			return input.Output{}, e
 		}
-		if string(mustJSON(target)) != string(mustJSON(req.Proposal.Target)) {
+		same := string(mustJSON(target)) == string(mustJSON(req.Proposal.Target))
+		if d.Args.Protocol == GoalProtocol {
+			same = sameOrdinaryTarget(target, req.Proposal.Target)
+		}
+		if !same {
 			return input.Output{}, ErrStale
 		}
 	}
@@ -288,6 +346,10 @@ func (c *Client) Reopen(ctx context.Context, w Caller, id string) (Session, erro
 	if e != nil {
 		return Session{}, e
 	}
+	c = c.forExecution(d)
+	if d.Args.Protocol == GoalProtocol {
+		return Session{}, ErrInvalid
+	} // Use PrepareReopen and retain its descriptor.
 	if release, ok := c.release(d.Story.Recipe.Source.SubmittedSelector); !ok || !release.Reopen {
 		return Session{}, ErrUnavailable
 	}
@@ -451,6 +513,7 @@ func (c *Client) OpenArtifact(ctx context.Context, w Caller, id, aid string) (Ar
 	if e != nil {
 		return ArtifactReader{}, e
 	}
+	c = c.forExecution(d)
 	var candidates []Artifact
 	for n, r := range d.Args.Attachments {
 		candidates = append(candidates, describe(n, r))

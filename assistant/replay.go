@@ -12,6 +12,7 @@ import (
 
 	"github.com/colony-2/c2j/pkg/artifacts"
 	"github.com/colony-2/c2j/pkg/input"
+	recipeops "github.com/colony-2/c2j/pkg/ops/recipe"
 	"github.com/colony-2/c2j/pkg/story"
 )
 
@@ -30,12 +31,20 @@ type TaskResult struct {
 	ModelInput  map[string]any `json:"model_input,omitempty"`
 }
 type replayData struct {
-	Ancestors []string
-	Story     *story.JobRunStory
-	Args      StartArgs
-	Entries   []Entry
-	Capture   *Capture
-	Prepared  *Prepared
+	ContextJob    string
+	OpeningPrompt string
+	Previous      string
+	Snapshot      *FrozenSnapshot
+	Coverage      map[string]string
+	Ancestors     []string
+	Story         *story.JobRunStory
+	Args          StartArgs
+	Entries       []Entry
+	Capture       *Capture
+	Prepared      *Prepared
+	// Accepted inputs are a transient projection of actual task outputs, used to
+	// reconcile a frozen retry after its waiting task has already completed.
+	Inputs []input.Output
 }
 
 func (c *Client) read(ctx context.Context, w Caller, job string) (*replayData, error) {
@@ -63,10 +72,23 @@ func (c *Client) readVisited(ctx context.Context, w Caller, job string, visited 
 	if e != nil {
 		return nil, fmt.Errorf("%w: %v", ErrUnavailable, e)
 	}
+	if s != nil && s.Root == nil {
+		release, ok := c.release(rows.Jobs[0].RecipeName)
+		if ok && release.Protocol == GoalProtocol {
+			s, e = c.projectUnstarted(ctx, w, job, release)
+			if e != nil {
+				return nil, e
+			}
+		}
+	}
 	d, e := c.project(s)
 	if e != nil {
 		return nil, e
 	}
+	if d.Snapshot != nil && d.Snapshot.TenantID != w.TenantID {
+		return nil, ErrForbidden
+	}
+	c.reconcileFailedDispatches(ctx, w, d)
 	if e = c.bindLineage(ctx, w, d, visited); e != nil {
 		return nil, e
 	}
@@ -77,10 +99,11 @@ func (c *Client) project(s *story.JobRunStory) (*replayData, error) {
 		return nil, ErrUnavailable
 	}
 	release, ok := c.release(s.Recipe.Source.SubmittedSelector)
-	if !ok || s.Recipe.ID != RecipeID || s.Recipe.Source.ResolvedCommit != release.Commit {
+	if !ok || s.Recipe.ID != RecipeID || (s.Recipe.Source.ResolvedCommit != release.Commit && !(s.Recipe.Source.Kind == "retainedSubmission" && s.Recipe.Source.ResolvedCommit == "" && release.Protocol == GoalProtocol)) {
 		return nil, ErrForbidden
 	}
 	var args StartArgs
+	var startSnapshot *FrozenSnapshot
 	rawArgs := map[string]any{}
 	if e := decode(s.Root.Input, &rawArgs); e != nil {
 		return nil, e
@@ -95,19 +118,52 @@ func (c *Client) project(s *story.JobRunStory) (*replayData, error) {
 		}
 		rawArgs["source"] = source
 	}
-	if e := decode(rawArgs, &args); e != nil || args.Protocol != release.Protocol || args.SessionID == "" {
+	if ordinaryProtocol(release.Protocol) {
+		var frozen FrozenSnapshot
+		if decode(rawArgs["snapshot"], &frozen) != nil || ValidateFrozenSnapshot(frozen, snapshotSelection(frozen)) != nil {
+			return nil, ErrInvalid
+		}
+		args.Protocol, _ = rawArgs["protocol"].(string)
+		args.SessionID, _ = rawArgs["session_id"].(string)
+		args.Prompt, _ = rawArgs["prompt"].(string)
+		args.Source = frozen.Source
+		if release.Protocol == GoalProtocol {
+			args.SessionID = s.GoalID
+		}
+		startSnapshot = &frozen
+	} else if e := decode(rawArgs, &args); e != nil {
+		return nil, e
+	}
+	if args.Protocol != release.Protocol || args.SessionID == "" {
 		return nil, ErrInvalid
 	}
 	if e := args.Source.validate(); e != nil {
 		return nil, e
 	}
-	d := &replayData{Story: s, Args: args}
+	d := &replayData{Story: s, Args: args, Snapshot: startSnapshot}
+	c = c.forExecution(d)
+	if release.Protocol == GoalProtocol {
+		d.ContextJob, _ = rawArgs["prior_job"].(string)
+		d.Previous, _ = rawArgs["previous_job"].(string)
+		if _, ok := rawArgs["previous_job"]; !ok {
+			d.Previous = d.ContextJob
+		}
+		d.OpeningPrompt = args.Prompt
+		if d.Previous == "" && args.Prompt == "" {
+			return nil, ErrInvalid
+		}
+	}
 	initial := Entry{Origin: Locator{JobID: args.SessionID, Task: 0}, Role: "user", Status: "succeeded", Text: args.Prompt}
 	for name, ref := range args.Attachments {
 		initial.Artifacts = append(initial.Artifacts, describe(name, ref))
 	}
 	sort.Slice(initial.Artifacts, func(i, j int) bool { return initial.Artifacts[i].ID < initial.Artifacts[j].ID })
-	d.Entries = append(d.Entries, initial)
+	if release.Protocol == GoalProtocol {
+		initial.Origin.JobID = s.JobID
+	}
+	if args.Prompt != "" && (release.Protocol != GoalProtocol || d.Previous == "") {
+		d.Entries = append(d.Entries, initial)
+	}
 	type item struct {
 		n    *story.JobRunStoryNode
 		role string
@@ -127,10 +183,16 @@ func (c *Client) project(s *story.JobRunStory) (*replayData, error) {
 			if release.Protocol == "cortex-assistant/1" {
 				expected = "./ops/assistant"
 			}
+			if ordinaryProtocol(release.Protocol) {
+				expected = "./ops/discussion"
+			}
+			if role == "dispatch" && release.Protocol == GoalProtocol {
+				expected = "recipes.run"
+			}
 			if role == "await-human" {
 				expected = "input"
 			}
-			if selector == expected && taskRolePath(n.Path, role) && (role != "await-human" || n.StepID == "collect_user_input") {
+			if (role != "assemble" || ordinaryProtocol(release.Protocol)) && selector == expected && taskRolePath(n.Path, role) && (role != "await-human" || n.StepID == "collect_user_input") {
 				nodes = append(nodes, item{n, role})
 			}
 		}
@@ -145,6 +207,9 @@ func (c *Client) project(s *story.JobRunStory) (*replayData, error) {
 	for _, it := range nodes {
 		n, role := it.n, it.role
 		loc := Locator{JobID: s.JobID, Task: *n.TaskOrdinal, Invocation: n.InvocationID, Path: n.Path}
+		if release.Protocol == GoalProtocol {
+			loc.Attempt = n.Attempt
+		}
 		entry := Entry{Origin: loc, Role: role, Status: string(n.Status)}
 		if n.Status != "succeeded" {
 			if n.Error != nil {
@@ -153,11 +218,22 @@ func (c *Client) project(s *story.JobRunStory) (*replayData, error) {
 			d.Entries = append(d.Entries, entry)
 			continue
 		}
+		if release.Protocol == GoalProtocol && role == "dispatch" {
+			var started recipeops.StartedJobs
+			if decode(n.Output, &started) != nil || len(started.Items) != 1 || started.Items[0].JobID == "" || started.Items[0].GoalID == "" || startSnapshot == nil || started.Items[0].TenantID != startSnapshot.TenantID {
+				return nil, ErrUnavailable
+			}
+			entry.Destination = started.Items[0].JobID
+			entry.DestinationGoal = started.Items[0].GoalID
+			d.Entries = append(d.Entries, entry)
+			continue
+		}
 		if role == "await-human" {
 			var out input.Output
 			if e := decode(n.Output, &out); e != nil || out.Receipt == nil {
 				return nil, ErrUnavailable
 			}
+			d.Inputs = append(d.Inputs, out)
 			cmd, commandErr := c.command(out.Response, c.latestResponse(d).Proposal)
 			key := "input/" + out.Receipt.RequestID + "/" + out.Receipt.SubmissionID
 			if seen[key] {
@@ -182,7 +258,29 @@ func (c *Client) project(s *story.JobRunStory) (*replayData, error) {
 			sort.Slice(entry.Artifacts, func(i, j int) bool { return entry.Artifacts[i].ID < entry.Artifacts[j].ID })
 		} else {
 			var out TaskResult
-			if e := decode(n.Output, &out); e != nil || out.Kind != role {
+			if ordinaryProtocol(release.Protocol) {
+				var ordinary OrdinaryResult
+				if decode(n.Output, &ordinary) != nil || ordinary.Protocol != release.Protocol || ordinary.Kind != role || strings.Join(ordinary.Origin.Path, "/") != strings.Join(n.Path[:4], "/") {
+					return nil, ErrUnavailable
+				}
+				out = TaskResult{Kind: ordinary.Kind, Origin: ordinary.Origin, Response: ordinary.Response, Form: ordinary.Form, Command: ordinary.Command, ModelInput: ordinary.ModelInput, Destination: ordinary.Destination}
+				if role == "capture" {
+					if ordinary.PriorJob != d.ContextJob || ordinary.SessionID != args.SessionID || ordinary.Prompt != args.Prompt || ordinary.Snapshot == nil || ordinary.Snapshot.Source != args.Source || string(mustJSON(ordinary.Snapshot)) != string(mustJSON(startSnapshot)) {
+						return nil, ErrUnavailable
+					}
+					frozen := ordinary.Snapshot
+					prompt, _, err := SnapshotPrompt(*frozen, snapshotSelection(*frozen), SnapshotMaxBytes)
+					if err != nil {
+						return nil, err
+					}
+					out.Capture = &Capture{Source: frozen.Source, At: frozen.At, Text: prompt}
+					d.Snapshot = frozen
+				}
+				if role == "assemble" {
+					d.Coverage = ordinary.Coverage
+					continue
+				}
+			} else if e := decode(n.Output, &out); e != nil || out.Kind != role {
 				return nil, ErrUnavailable
 			}
 			if out.Origin.JobID == "" || out.Origin.Invocation == "" {
@@ -190,6 +288,9 @@ func (c *Client) project(s *story.JobRunStory) (*replayData, error) {
 			}
 			entry.Origin = out.Origin
 			entry.Origin.Task = *n.TaskOrdinal
+			if release.Protocol == GoalProtocol {
+				entry.Origin.Attempt = n.Attempt
+			}
 			key := role + "/" + out.Origin.JobID + "/" + out.Origin.Invocation
 			if seen[key] {
 				continue
@@ -223,6 +324,7 @@ func (c *Client) project(s *story.JobRunStory) (*replayData, error) {
 				}
 				entry.Role = "assistant"
 				entry.Text = out.Response.Text
+				entry.Citations = append([]string(nil), out.Response.Citations...)
 				entry.Artifacts = out.Response.Artifacts
 				for _, doc := range out.Response.Documents {
 					var found bool
@@ -242,7 +344,11 @@ func (c *Client) project(s *story.JobRunStory) (*replayData, error) {
 				entry.Proposal = out.Response.Proposal
 				entry.Error = out.Response.Error
 			}
+			if role == "dispatched" {
+				continue
+			} // The original recipes.run task above owns the history entry.
 			if role == "dispatch" {
+				entry.Role = "dispatch"
 				entry.Destination = out.Destination
 				entry.Error = out.Error
 			}
@@ -306,7 +412,16 @@ func completed(entries []Entry) []Entry {
 	return out
 }
 func (c *Client) page(w Caller, d *replayData, p PageRequest) (ReplayPage, error) {
+	c = c.forExecution(d)
 	entries := completed(d.Entries)
+	if d.Args.Protocol == GoalProtocol {
+		entries = nil
+		for _, e := range d.Entries {
+			if e.Status == "succeeded" || e.Status == "failed" || e.Status == "canceled" {
+				entries = append(entries, e)
+			}
+		}
+	}
 	end, water := len(entries), len(entries)
 	hash := digest(entries)
 	if p.Cursor != "" {
@@ -314,7 +429,7 @@ func (c *Client) page(w Caller, d *replayData, p PageRequest) (ReplayPage, error
 		if e != nil {
 			return ReplayPage{}, e
 		}
-		if v.Kind != "replay" || v.Tenant != w.TenantID || v.Job != d.Story.JobID || v.Session != d.Args.SessionID {
+		if v.Kind != "replay" || v.Tenant != w.TenantID || (d.Args.Protocol != GoalProtocol && v.Job != d.Story.JobID) || v.Session != d.Args.SessionID {
 			return ReplayPage{}, ErrForbidden
 		}
 		if v.Watermark < 0 || v.Watermark > len(entries) || v.End < 0 || v.End > v.Watermark || digest(entries[:v.Watermark]) != v.Digest {
@@ -364,7 +479,7 @@ func (c *Client) Replay(ctx context.Context, w Caller, id string, p PageRequest)
 }
 
 func taskRolePath(path []string, role string) bool {
-	state := map[string]string{"capture": "capture", "response": "infer", "await-human": "prompt", "accept": "prompt", "prepare-action": "action", "dispatch": "action"}[role]
+	state := map[string]string{"capture": "capture", "assemble": "infer", "response": "infer", "await-human": "prompt", "accept": "prompt", "prepare-action": "action", "dispatch": "action", "dispatched": "action"}[role]
 	if state == "" || len(path) < 4 || len(path) > 5 {
 		return false
 	}

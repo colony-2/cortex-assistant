@@ -86,10 +86,16 @@ func (c *fixtureControl) GetArtifactLazy(ctx context.Context, tenant string, key
 	return nil
 }
 
-type fixtureSubmitter struct{ jobs []jobdb.SubmitJob }
+type fixtureSubmitter struct {
+	jobs                []jobdb.SubmitJob
+	preserveDestination bool
+}
 
 func (s *fixtureSubmitter) SubmitJobRef(ctx context.Context, j jobdb.SubmitJob) (jobref.Ref, error) {
 	s.jobs = append(s.jobs, j)
+	if s.preserveDestination {
+		return jobref.Ref{TenantID: j.TenantId, JobID: j.JobID, GoalID: "goal"}, nil
+	}
 	return jobref.Ref{TenantID: "tenant", JobID: "submitted", GoalID: "goal"}, nil
 }
 func client(t *testing.T) (*Client, *fixtureStory, *fixtureControl, *fixtureSubmitter) {
@@ -485,7 +491,7 @@ func (c *fixtureControl) ListJobs(ctx context.Context, req jobdb.ListJobsRequest
 		if len(req.JobKeys) > 0 && req.JobKeys[0].JobId != id {
 			continue
 		}
-		out = append(out, workflowctl.JobItem{JobSummary: jobdb.JobSummary{JobKey: jobdb.JobKey{TenantId: "tenant", JobId: id}, Cell: "root", CellRepo: "github.com/example/root", JobType: "recipe", Metadata: mustJSON(map[string]any{"repo": "https://github.com/example/root.git", "recipe": selector})}})
+		out = append(out, workflowctl.JobItem{JobSummary: jobdb.JobSummary{JobKey: jobdb.JobKey{TenantId: "tenant", JobId: id}, GoalID: c.story.jobs[id].GoalID, Cell: "root", CellRepo: "github.com/example/root", JobType: "recipe", Metadata: mustJSON(map[string]any{"repo": "https://github.com/example/root.git", "recipe": selector})}})
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].JobKey.JobId < out[j].JobKey.JobId })
 	if c.backendPage > 0 {

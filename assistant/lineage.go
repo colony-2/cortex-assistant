@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/colony-2/c2j/pkg/input"
 	"github.com/colony-2/jobdb/pkg/jobdb"
 )
 
@@ -19,6 +20,33 @@ type HistoryReader interface {
 // bindLineage verifies the runtime's restart source before assigning ancestor
 // locators. Equal ordinals or equal text alone never establish shared history.
 func (c *Client) bindLineage(ctx context.Context, w Caller, d *replayData, visited map[string]bool) error {
+	if d.Args.Protocol == GoalProtocol {
+		if d.Story.GoalID != d.Args.SessionID {
+			return ErrUnavailable
+		}
+		if d.Previous == "" {
+			return nil
+		}
+		parent, err := c.readVisited(ctx, w, d.Previous, visited)
+		if err != nil {
+			return err
+		}
+		if parent.Args.Protocol != GoalProtocol || parent.Story.GoalID != d.Story.GoalID || parent.Args.Source != d.Args.Source || string(mustJSON(parent.Snapshot)) != string(mustJSON(d.Snapshot)) {
+			return ErrUnavailable
+		}
+		contextJob := parent.ContextJob
+		if parent.Capture != nil {
+			contextJob = parent.Story.JobID
+		}
+		if d.ContextJob != contextJob || (contextJob == "" && d.Args.Prompt != parent.OpeningPrompt) || (contextJob != "" && d.Args.Prompt != "") {
+			return ErrUnavailable
+		}
+		d.OpeningPrompt = parent.OpeningPrompt
+		d.Ancestors = append(append([]string{}, parent.Ancestors...), parent.Story.JobID)
+		d.Entries = append(append([]Entry{}, parent.Entries...), d.Entries...)
+		d.Inputs = append(append([]input.Output{}, parent.Inputs...), d.Inputs...)
+		return nil
+	}
 	if d.Story.JobID == d.Args.SessionID {
 		return nil
 	}

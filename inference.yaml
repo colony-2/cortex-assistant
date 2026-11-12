@@ -1,0 +1,34 @@
+id: cortex-assistant-inference
+schema_version: 2
+desc: Explicit host bindings for the ordinary structured inference operation.
+input_schema:
+  base_url: {type: string, required: true}
+  api_key: {type: string, secret: true, required: true}
+  provider: {type: string, required: true}
+  model: {type: string, required: true}
+  prompt: {type: string, required: true}
+  response_schema: {type: object, required: true}
+inputs:
+  base_url: '${{ inputs.base_url }}'
+  api_key: '${{ inputs.api_key }}'
+  provider: '${{ inputs.provider }}'
+  model: '${{ inputs.model }}'
+  prompt: '${{ inputs.prompt }}'
+  response_schema: '${{ inputs.response_schema }}'
+sequence:
+  - id: infer
+    op: nix:github:colony-2/c2ops/6396e1fe6462084e85ea44d86d372bdf3b133db0#pydantic
+    timeout: 45s
+    inputs:
+      api:
+        base_url: '${{ inputs.base_url }}'
+        api_key: '${{ inputs.api_key }}'
+      default_provider: '${{ inputs.provider }}'
+      default_model: '${{ inputs.model }}'
+      prompt: '${{ inputs.prompt }}'
+      response_schema: '${{ inputs.response_schema }}'
+      invocation_timeout: 30
+outputs:
+  response: '${{ sequence.infer.outputs.response }}'
+  model: '${{ sequence.infer.outputs.model }}'
+  usage: '${{ sequence.infer.outputs.usage }}'

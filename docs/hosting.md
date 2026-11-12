@@ -1,80 +1,173 @@
 # Host composition contract
 
-The module exports `NewActivity(client, ActivityOptions)` and
-`RegisterActivity(registry, activity)`. Construct Client from the host's existing
-Goals, History, Control, Story, Input, Submitter, authorization and target resolver.
-Configure `Config.Root` with the registered `CellName` and canonical `CellRepo`
-(repository assertions use JobDB normalization). `RepositorySource` supplies the
-Git execution source; when `CellRepo` is omitted it must itself normalize to a
-portable repository identity. Discovery filters by registered cell name and
-checks each row's tenant and canonical repository before reading session data.
-The host supplies registry authority for its existing JobDB runtime; the facade
-does not provision cells or grant registry permissions. Catalog targets used for
-confirmed dispatch must likewise contain their registered `CellName`.
+## Current ordinary v4 route
 
-Options supply trusted provider/model names and execution authorization. No second
-remote connection, configuration file or runtime is created by the activity.
+Use `assistant.GoalProtocol` with an immutable published `discussion-goal.yaml`
+selector and matching `RecipeCommit`. `Config.Root` identifies the registered
+canonical `CellName` and `CellRepo`; `RepositorySource` supplies its Git execution
+source. The facade uses existing Goals, History, Control, Story, Input and
+Submitter collaborators. `Authorize` must enforce actual tenant/actor/job access
+before reading bytes or acting. `ResolveCell` supplies current registered target
+identity. These are trusted application bindings, never browser/model fields.
 
-The recipe names operation `cortex_assistant`; c2j expands its `run` step to task
-route `cortex_assistant:run`. RegisterActivity installs the host executable in its
-ActivityRegistry and a stateless fail-closed Definition in the compiler's process
-metadata registry. The latter contains no Client or authorization/model state.
-Registries built after metadata registration initially contain that fail-closed
-definition; RegisterActivity replaces only that exact definition locally. Foreign
-or already installed host activities conflict. No unrelated operation is replaced.
-Registration is a startup operation before WorkSet construction, not concurrent
-with execution. NewActivity itself has no registration side effects.
+No assistant activity registration, custom runner or second remote connection is
+needed. Construct the host's ordinary c2j worker with consistent allocation,
+`StageExecution` and `WrapTaskWorker`, then start its single owned engine runner.
+Preserve tenant, source/workspace/secret and allocation constraints. Drain HTTP,
+cancel/join execution, then close owned resources. Clean up partial startup;
+externally owned resources remain the caller's responsibility. Constructing a
+Client and calling handlers starts no runner and mutates no operation registry.
+The external-package consumer test exercises queued ordinary submission/read,
+an unavailable submit adapter, unchanged global operations and a completed
+unrelated ordinary recipe on the caller-owned SQLite runtime/engine.
 
-Inputs use typed ActivityInput with closed decoding and action checks. TaskResult
-is canonically encoded to the existing JSON object output shape because upstream
-facade request structs lack the schema tags required by the activity registrar.
-Existing policy validation bounds each result; this is not a second transcript.
-The adapter validates CurrentJobContext coordinates, action/path, the immutable
-recipe/protocol descriptor and the injected session authority before Worker.
-Documents use AddOutputArtifact and publication failures retain their cause and
-return no completed response output.
+Read-only replay still requires the public Host collaborators. Supply existing
+read services, fail-closed mutation adapters and route authorization. An
+unavailable `Submitter` can return `ErrUnavailable` without blocking retained
+reads. It alone does not deny Close or Respond: the host must also enforce its
+read-only policy at HTTP/control/input boundaries. Never infer execution authority
+from the existence of a read client.
 
-The execution authorizer must return the principal authorized to execute this
-session, not simply trust a tenant, cell catalog or browser actor. Agent authority
-cannot produce a human confirmation receipt. HTTP request identity must come from
-the deployment authentication boundary; Cortex's email cookie is not sufficient.
-Provider/model and existing secret bindings are deployment-owned, never model or
-browser overrides. Missing authority/capability fails explicitly.
+## Trusted capture and bindings
 
-Cortex adoption is separate consumer work at cortexcli.serve, shared by production
-and development. Application composition owns the shared resources, registers the
-actual activity before building the ordinary WorkSet and installs exactly one
-executable recipe worker supporting replay. Resolve NewServer's read-only replay
-registration explicitly; preserve history-only construction. Do not rely on
-registration order or put host-bound Clients in a process-global replay registry.
+The request boundary supplies a `FrozenSnapshot` and independent
+`SnapshotSelection`. Bind tenant, exact story/review request, capture time,
+selected document IDs, original producer job/task, stored references and captured
+byte hashes. Never derive the trusted selection from the browser/model payload
+being checked. `DecodeFrozenSnapshot` performs closed validation without source
+lookup. Global snapshots contain no page documents. Replaced review identities,
+forged producers/references and unselected documents fail validation.
 
-Use executionruntime with consistent allocation, StageExecution and
-WrapTaskWorker on all live tasks, including extensions/model. Keep tenant,
-source/workspace/secret and allocation constraints. Start one engine runner and
-HTTP only after successful composition. Coordinate failures, bound HTTP drain,
-cancel/join execution and then close owned resources. Clean up partial startup;
-externally owned resources remain the caller's responsibility. A handler starts
-no runner and mutates no registry.
+Snapshots allow at most 32 documents, 32 KiB of UTF-8 text per source document and
+64 KiB encoded JSON overall, including escaping. Each document records capture
+provenance and included, truncated, denied, unavailable, unsupported or
+budget-omitted outcome. Nonread outcomes carry no captured text/hash.
+`SnapshotPrompt` includes whole documents in stable ID order within the encoded
+budget. No URL-only reference proves bytes were read. Cortex owns actual capture
+at its request boundary and later HTTP/browser integration.
 
-Legacy v1 release descriptors approve exact immutable selectors and protocols.
-History is read using its own helper selector; v1 extension output is never
-interpreted as v2 activity output. Reopen defaults unavailable for legacy routes;
-enable it only when the original executable route is actually supported. New
-submissions always use v2. No pending task or committed action is migrated.
+`OrdinaryBindings` supplies endpoint, named secret reference, provider and model.
+The includable `inference.yaml` forwards them through declared inputs to immutable
+c2ops `6396e1fe6462084e85ea44d86d372bdf3b133db0#pydantic`. Existing caller authority
+for the secret is required; Cortex must not fetch or submit plaintext. Missing,
+empty or invalid bindings fail before provider calls. Browser, prompt, evidence
+and model output cannot supply routing, selectors, credentials or limits.
+The leaf allows a 30-second overall inference deadline inside a 45-second task
+deadline; package realization and startup require additional runtime headroom.
+The effective modules are c2j `v0.0.125-0.20261111181458-c2193c57d890` and JobDB
+`v0.0.81-0.20261110034917-7f6133791ec9`.
 
-Candidate tests must name the exact tree and use the actual registered activity
-without helper interception or CORTEX_ASSISTANT_CONFIG. Model fixtures support
-negative tests; actual provider/usage/provenance and artifact hashes remain a
-separate requirement. After authorized publication, verify the resulting immutable
-selector through that same route and record its relationship to the candidate.
-Local suite success is not published release or Cortex integration acceptance.
+The runtime owns resolution of secret references. Source tests audit retained
+inputs, attempts, results and readable IO artifact references for synthetic
+plaintext, and scan exported diagnostics. These are bounded audits, not a claim
+about every external service/process log. Treat runtime storage, configuration,
+transport and access as privileged even when exported results contain no key.
 
-The opt-in `TestWorkerActualProvider` runs the same guarded registered activity
-and the pinned pydantic extension without helper or model interception. Supply
-`ASSISTANT_REAL_MODEL`, `OPENAI_BASE_URL`, `OPENAI_API_KEY`, and an absolute
-`ASSISTANT_PROVIDER_EVIDENCE` output path from trusted host bindings. The ordinary
-suite skips this external check unless a model is explicitly selected. Do not put
-credential values in recipe inputs or checked-in files. The evidence records the
-validated response, usage, local recipe binding, replay provenance and hashes of
-bytes downloaded through the facade. It does not establish published-selector
-or Cortex consumer acceptance.
+## Frozen operations and sequential lifecycle
+
+`PrepareStartFrozen` returns complete authenticated `FrozenStart` bytes. Retain
+that operation with the logical request before calling `SubmitFrozenStart`.
+Retry it unchanged after uncertain transport, including host replacement. Keep
+`CursorKey` stable so the caller and integrity can be verified. Named secret
+references do not retain future authority. `StartFrozen` is a convenience for
+callers without a durable prepublication step. The authoritative receipt's goal
+ID identifies the v4 session; retain its execution job ID too.
+
+Close targets the captured execution job ID, including delayed requests. Inspect
+its result until terminal before preparing sequential reopen. Cancellation does
+not roll back accepted external work or prove a provider request stopped.
+`PrepareReopen` accepts that job, logical request ID and frozen timestamp; retain
+and submit its returned operation unchanged. Same-goal selection uses existing
+host authority, with no fallback goal. Succeeded or explicitly failed goals cannot
+reopen. Competing simultaneous reopen clients are excluded.
+
+The fresh v4 job reads retained predecessors and waits for new input without
+recapturing a page or replaying opening inference, committed replies or dispatch.
+Original task/attempt/receipt/artifact origins remain inspectable. Missing records
+return unavailable. There is no second transcript, coordinator or session store.
+V4 `finish` returns to waiting; explicit close is captured-job cancellation.
+`Reopen` is the historical restart API; use prepare/submit for v4.
+
+Freeze complete request/submission IDs and command/attachment bytes for Respond.
+Retries reconcile the authoritative occurrence and actor. Changed contents
+conflict; new submissions to an old prompt are stale. V4 accepts up to four bound
+attachments, at most 16 KiB each and 64 KiB combined with generated documents.
+UTF-8 plain text, Markdown and valid JSON may enter the bounded prompt. Other
+media is explicitly unsupported for model reading and remains downloadable.
+OpenArtifact authorizes the original producer; close every returned reader.
+Missing bytes remain unavailable, while retained metadata stays inspectable.
+
+`OrdinaryLimits` bounds human text at 16 KiB, assistant text32KiB, snapshot64KiB,
+raw model field128KiB, model prompt96KiB and encoded operation input/upload/page
+at192KiB. V4 human text also fits the JSON string-content bound. Runtime chapter
+headroom is64KiB below the default256KiB. Paging is per-page, not a total-history
+cap. Discovery exhausts backend pages and does not promise constant memory or
+bounded whole-history cost. Stable-watermark cursors bind authorized tenant,
+session, execution and retained lineage; refresh after continuation.
+
+## Exact confirmed backend dispatch
+
+The v4 helper resolves the proposed existing cell through its task-scoped broker.
+Root's accepted policy treats registered canonical resolution as eligibility;
+submission authority is still enforced by the broker. The current form carries
+canonical name, immutable CellID, repository and full prompt. Human confirmation
+must match the exact current ID/hash. Host ResolveCell rechecks current identity;
+the helper checks again before the standard `recipes.run` task submits a separate
+backend goal. Repository strings alone do not establish eligibility.
+
+HTTP confirmation retries reuse request/submission IDs and return the original
+input receipt. c2j owns the dispatch task's retained inputs, logical invocation,
+destination and task recovery. Do not add a recipe-level retry: a new invocation
+can allocate another child. A restart creates a new parent and can likewise
+allocate a new destination. Reopening the discussion consumes the confirmed
+proposal even when submission outcome is unavailable and never resubmits it.
+
+After terminal failure, replay performs read-only typed child listing by original
+tenant, parent job and SHA-256 of the exact logical invocation. It follows active
+and archived pages, verifies a unique canonical child and persisted StartJob
+against the recorded operation and confirmation, and authorizes child access.
+The original failed status/error stays; `recovery: accepted`, `destination` and
+`destination_goal` establish submission acceptance, not backend completion.
+Missing, denied, ambiguous or mismatched records yield `recovery: unavailable`
+without submitting another job.
+
+Retained task input is a reconstruction contract, not an unconditional serialized
+backend request snapshot. Live lookup/configuration, Git profile/credentials and
+authorization may change. Mutable Git refs do not prove immutable backend source
+bytes. Literal unchanged dispatch inputs and complete host FrozenStart descriptors
+are separately tested. No new c2j capability or permission is introduced.
+
+## Compatibility and release evidence
+
+Explicit v1/v2/v3 `LegacyReleases` preserve their own immutable selectors,
+protocols, pending tasks and identities. V3 `discussion.yaml` remains read-only
+for reopen and rejects attachments as before. Frozen v2 uses `session.yaml` and
+its original `cortex_assistant:run` host activity. For that historical route only,
+construct `NewActivity` with trusted provider/model and execution authorization,
+then `RegisterActivity` before constructing the ordinary WorkSet. Registration
+installs only its exact fail-closed metadata definition; unrelated activities are
+preserved. See the README's frozen v2 reference for its larger historical limits
+and original model selector. The pre-existing v1 executable deprecation remains;
+no new migration or deprecation is authorized.
+
+The mandatory build verification hook resolves the exact managed candidate commit C
+and its full tree through the ordinary worker, helper, input runtime and durable
+SQLite storage. Canonical assistant selectors end in C. A supported tenant Git
+profile maps their transport to a read-only local HTTP mirror of that same commit;
+no substitute assistant commit is created. Full-tree blob/mode hashes and resolved
+recipe artifacts identify the tested source, including helper manifests and modules.
+
+The unchanged pinned c2ops package executes against deterministic HTTPS structured
+provider responses. Its existing `NIX_SSL_CERT_FILE` trust mechanism selects an
+ephemeral fixture CA only in the test subprocess; certificate and hostname checking
+remain enabled. The hook uses no `--fixture-loopback`, manifest replacement or
+inference-result interception. Each required case exports actual request bodies,
+validated results, task/attempt/receipt origins and download hashes in a separate
+directory. Missing evidence, required skips and identity/integrity failures fail the
+hook. Historical source-only tests outside this hook retain their documented HTTP
+fixture-manifest boundary and do not certify candidate acceptance.
+
+This proves candidate behavior and byte provenance before assessment. It does not
+prove public fetchability, the eventual squash/merge hash, live-provider behavior
+or deployment. Public assistant publication is no longer a separate pre-completion
+gate. Cortex browser/deployment acceptance belongs to its unchanged later assignment.

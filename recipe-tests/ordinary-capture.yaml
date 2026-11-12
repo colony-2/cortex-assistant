@@ -1,0 +1,54 @@
+id: cortex-assistant-session
+schema_version: 2
+input_schema:
+  model_response:
+    type: string
+    default_value: '{"text":"grounded","documents":[],"return_artifact_ids":[],"citations":[]}'
+  snapshot:
+    type: object
+    default_value: {source: {kind: global}, documents: []}
+inputs:
+  model_response: '${{ inputs.model_response }}'
+  snapshot: '${{ inputs.snapshot }}'
+state:
+  initial: capture
+  states:
+    capture:
+      inputs:
+        snapshot: '${{ inputs.snapshot }}'
+      sequence:
+        - id: capture
+          op: ./ops/discussion
+          inputs:
+            action: capture
+            session_id: capture-fixture
+            prompt: A global discussion
+            snapshot:
+              tenant_id: '${{ context.workflow.project_id }}'
+              source: '${{ inputs.snapshot.source }}'
+              at: '2026-11-11T00:00:00Z'
+              documents: '${{ inputs.snapshot.documents }}'
+      transitions:
+        - to: infer
+          when: 'true'
+    infer:
+      inputs:
+        model_response: '${{ inputs.model_response }}'
+      sequence:
+        - id: assemble
+          op: ./ops/discussion
+          inputs: {action: assemble}
+        - id: response
+          op: ./ops/discussion
+          inputs:
+            action: response
+            model:
+              response: '${{ inputs.model_response }}'
+              model: fixture
+              usage: {}
+      outputs:
+        response: '${{ sequence.response.outputs.response }}'
+        assembled: '${{ sequence.assemble.outputs }}'
+outputs:
+  assembled: '${{ states.infer.outputs.assembled }}'
+  response: '${{ states.infer.outputs.response }}'

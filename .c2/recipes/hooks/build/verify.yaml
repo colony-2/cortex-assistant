@@ -1,5 +1,5 @@
 id: cortex-assistant-verification
-version: 2.0.0
+version: 3.0.1
 inputs:
   api_version: ${{ inputs.api_version }}
   request: ${{ inputs.request }}
@@ -29,5 +29,5 @@ outputs:
   api_version: c2.build-hook/v1
   status: ${{ json_parse(sequence.verify.outputs.stdout).status }}
   summary: ${{ json_parse(sequence.verify.outputs.stdout).summary }}
-  artifact_refs:
-    verification-evidence.json: ${{ sequence.verify.artifacts['verification-evidence.json'] }}
+  artifact_refs: >-
+    ${{ jq(sequence.verify.artifacts, 'del(.["__git_state_thin_pack__"], .["diff_from_parent.diff"], .["diff_from_base.diff"]) | . as $refs | with_entries(select(.key == "verification-evidence.json" or .key == "evidence-index.md" or .key == "case-index.json" or .key == "candidate-manifest.json")) + {"artifact-catalog.json": {"kind": "value", "name": "artifact-catalog.json", "format": "json", "value": $refs}}') }}

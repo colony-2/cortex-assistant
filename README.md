@@ -1,5 +1,90 @@
 # Cortex assistant
 
+The current source contract is `cortex-assistant/4` (`assistant.GoalProtocol`),
+using `discussion-goal.yaml` and the ordinary `ops/discussion` helper on the
+existing c2j worker. It supports sequential close/reopen in one open goal,
+retained conversation and downloads, concurrent sends, and exact confirmed
+backend dispatch. No assistant activity registration or Cortex runner is needed.
+Immutable assistant publication and resolution must be verified after source
+review; local fixture commits are not published releases.
+
+Configure `assistant.New` with `GoalProtocol`, the published immutable
+`git+https://github.com/colony-2/cortex-assistant.git//discussion-goal.yaml@<40-hex-commit>`
+selector, matching `RecipeCommit`, stable deployment `CursorKey`, and trusted
+`OrdinaryBindings`. Bindings require an exact HTTPS API root, `openai`, an
+unqualified model and `secrets.Reference{Name: "assistant_api_key"}`. They are
+server configuration. The caller needs existing authority for the named secret;
+the runtime resolves the opaque reference for execution.
+
+Capture the snapshot and independent `SnapshotSelection` at the trusted request
+boundary, including tenant, exact review request and original document producers.
+`PrepareStartFrozen` returns the complete authenticated operation. Retain it in
+the host's existing request record before `SubmitFrozenStart`; retry the saved
+operation unchanged after uncertainty or host replacement. The authoritative
+receipt's goal ID is the session ID. `Get`/`Replay` reconstruct retained tasks,
+input receipts, source coverage, citations, failures and artifact references.
+Missing history or bytes report unavailable.
+
+Close targets the job ID captured by the request. Reconcile terminal cancellation
+before `PrepareReopen`, then retain and submit its complete returned operation.
+Sequential reopen creates a fresh prompt-ready job in the same open goal without
+replaying opening inference, committed replies or backend dispatch. Permanently
+succeeded or explicitly failed goals cannot reopen. Competing simultaneous
+reopen clients are outside this contract. See the compiled public
+[consumer examples](assistant/ordinary_example_test.go) and [hosting contract](docs/hosting.md).
+
+At a prompt, freeze request ID, submission ID and complete command/attachment
+bytes together. Send retries return the original authoritative receipt; changed
+contents conflict, and new submissions to an old prompt are stale. V4 supports
+stored or runtime-uploaded attachments and generated documents. UTF-8 text and
+valid JSON may be included within budgets; image/video/audio downloads preserve
+opaque bytes, without media-understanding claims. Confirmation must match the
+current canonical eligible target and prompt. The standard `recipes.run` task
+owns backend submission. Replay can discover a single verified accepted child
+after terminal failure while preserving that failure; it never submits a new
+backend job to resolve uncertainty.
+
+`OrdinaryLimits` reports 16 KiB human text, 32 KiB assistant text, 64 KiB frozen
+snapshot, 128 KiB raw model field, 16 KiB per document/file, four files and 64 KiB
+aggregate, and 192 KiB encoded upload/replay envelopes. The helper separately
+bounds encoded operation input at 192 KiB and model prompts at 96 KiB, leaving
+headroom below the runtime's default 256 KiB chapter envelope. UTF-8 byte and
+encoded JSON bounds both apply. These are per-operation/page limits, not a total
+conversation limit.
+
+Current dependencies are Go 1.26, c2j
+`v0.0.125-0.20261111181458-c2193c57d890` and JobDB
+`v0.0.81-0.20261110034917-7f6133791ec9`. The ordinary inference selector is:
+
+```
+nix:github:colony-2/c2ops/6396e1fe6462084e85ea44d86d372bdf3b133db0#pydantic
+```
+
+The worker owns allocation, resolution/cache and execution. The host supplies
+existing story/control/input/history/submitter resources and authorization,
+starts its engine, and cancels/joins it before closing owned resources. Handlers
+start no runner and install no activities. Read-only applications provide their
+existing read services and deny mutation at their route/control/input/submission
+boundaries. `TestConsumerOrdinaryRuntimeAndReadOnly` exercises public composition
+with SQLite, retained queued reads, an unavailable submit adapter and an unrelated
+ordinary recipe.
+
+The ordinary integration suite resolves actual helpers from a committed local
+source fixture and executes the immutable c2ops payload. A trusted test manifest
+adds its `--fixture-loopback` flag for a deterministic HTTP provider; production
+inputs cannot enable it. Evidence records model bodies, task/receipt/artifact
+origins and downloaded-byte hashes. This establishes source behavior with those
+fixture boundaries. Same-route immutable assistant resolution remains a separate
+release check. Cortex owns later HTTP/browser integration.
+
+Explicit v1/v2/v3 descriptors preserve historical reads, identities and pending
+executions. V3 uses `discussion.yaml`, has no supported reopen and rejects
+attachments as before. No migration or new deprecation is introduced. The
+following section documents the frozen v2 route; its activity setup and larger
+ceilings apply only to that historical contract.
+
+# Frozen v2 compatibility reference
+
 An ordinary c2j recipe runs the conversation. The standalone `assistant` Go package interprets its recorded task data for Cortex; no conversation database, cumulative discussion artifact or provider session exists. The accepted contracts and unchanged release expectations are in [docs/design.md](docs/design.md) and [docs/test-statements.md](docs/test-statements.md).
 
 `session.yaml` captures context once, assembles bounded preceding records, calls the pinned c2ops pydantic operation, validates/materializes the response, then waits for structured human input. Send performs inference; confirm prepares and submits the exact existing-cell build; finish ends successfully. Invalid accepted input returns a visible error and fresh input without inference or dispatch. Model operation failure returns to input through a bounded validation error. Ordinary runtime attempts remain available in generic replay.
@@ -39,7 +124,7 @@ Finish/reopen uses the node's actual `RestartScopeID`, validates restart context
 
 ## Worker configuration and releases
 
-New sessions use protocol `cortex-assistant/2` and `cortex_assistant:run`.
+Frozen v2 sessions use protocol `cortex-assistant/2` and `cortex_assistant:run`.
 Construct the facade with Cortex's existing host resources, then construct and
 register its instance-bound activity before building the normal c2j WorkSet:
 
@@ -71,16 +156,16 @@ adoption is separate work; adding the module does not start workers in NewServer
 
 The legacy `ops/assistant` / `cmd/assistant-op` executable is deprecated for new
 sessions. It remains available only for explicitly supported original v1
-execution. `Config.LegacyReleases` explicitly approves immutable v1 descriptors
-for reading. Reopening is denied unless that descriptor's `Reopen` flag attests
-that the original route remains installed. No history or pending task is silently
-migrated; new starts always use the configured v2 release.
+execution. `Config.LegacyReleases` explicitly approves immutable v1 and frozen v2
+descriptors for reading. Reopening is denied unless that descriptor's `Reopen`
+flag attests that the original route remains installed. No history or pending task is silently
+migrated; starts through the legacy `Start` method use the configured v2 release.
 
 Candidate verification binds the exact tree and recipe content. After authorized
 publication, execute the resulting immutable selector through the same registered
 activity/model path and record its relationship to that candidate. Synthetic test
-selectors are not published releases. Corrected c2j remains pinned at
-`v0.0.122` with JobDB `v0.0.74` and Go 1.26; the model operation remains:
+selectors are not published releases. The historical v2 baseline used c2j `v0.0.122` and JobDB `v0.0.74`;
+the frozen model identity remains:
 
 ```
 git+https://github.com/colony-2/c2ops.git//pydantic@f30202d13d197beaed7ba0bd0b120b04443728eb
@@ -106,6 +191,6 @@ c2j test run --file recipe-tests/session.test.yaml --out-dir /tmp/assistant-reci
 
 The Go worker integration test runs actual c2j workers, input receipts, helper policies, replay, documents, finish and reopen against toy, SQLite and the existing remote SDK/server, replacing the worker engine and facade before reopen. Assistant tasks use the exported registered activity; only model responses and root release resolution are fixtures. The SQLite goal test injects loss after normal destination submission, retries the frozen request, and checks one completed destination with no extra inference. Model execution and root release resolution are deterministic fixtures. Native recipe tests separately exercise real input collection/routing with model/helper fixtures. Unit tests cover hostile/malformed inputs, byte/page/file boundaries, role spoofing, provenance, cursors, proposals, uploads and unavailable history.
 
-These checks do not certify a real provider/model, the published assistant release, production credentials/retention, production fault injection and concurrency, or Cortex UI integration. Those approved release gates remain required. The v1 executable route is deprecated for new starts; approved legacy histories remain readable without migration.
+These checks do not certify a real provider/model, the published assistant release, production credentials/retention, production fault injection and concurrency, or Cortex UI integration. The mandatory build hook now verifies exact candidate source and unchanged inference through ordinary operations over an HTTPS provider fixture; public assistant fetchability is not a separate pre-completion gate. The v1 executable route is deprecated for new starts; approved legacy histories remain readable without migration.
 
 Human execution guidance: validate this cell with embedded c2j and JobDB. Cortex consumes the facade; its checkout, browser suite and deployment configuration are not prerequisites for building or testing this module. Consumer integration checks remain consumer-owned.

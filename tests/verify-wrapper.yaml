@@ -1,4 +1,8 @@
 id: verify-integration-boundary
+input_schema:
+  stress: {type: boolean, default_value: false}
+inputs:
+  stress: ${{ inputs.?stress.orValue(false) }}
 sequence:
 - id: actual_wrapper
   include: ./recipes/develop/verify.yaml
@@ -7,6 +11,48 @@ sequence:
     target_directory: .
     documents: {}
     settings: null
+- id: read_catalog
+  op: command_execution
+  artifacts:
+    artifact-catalog.json: ${{ sequence.actual_wrapper.outputs.artifact_refs['hooks/verify/0/artifact-catalog.json'] }}
+  inputs:
+    run: |
+      python3 - <<'PY'
+      import json, os, pathlib
+      refs = json.loads((pathlib.Path(os.environ['INBOX']) / 'artifact-catalog.json').read_text())
+      keys = {name: ref['stored']['key'] for name, ref in refs.items()}
+      first = keys['verification-evidence.json']
+      producer = {name: first[name] for name in ('jobId', 'taskOrdinal')}
+      assert all(all(key[name] == value for name, value in producer.items()) for key in keys.values())
+      # Avoid the command stdout truncation limit without changing identities.
+      print(json.dumps({'producer': producer, 'sizes': {name: key['sizeBytes'] for name, key in keys.items()}}))
+      PY
+    env:
+      INBOX: ${{ context.environment.op.inbox }}
+- id: read_evidence
+  when: inputs.stress
+  op: command_execution
+  artifacts:
+    verification-evidence.json: ${{ sequence.actual_wrapper.outputs.artifact_refs['hooks/verify/0/verification-evidence.json'] }}
+    # Stress fixture bindings are inserted here by test_verify.py.
+  inputs:
+    run: |
+      python3 - <<'PY'
+      import hashlib, json, os, pathlib
+      root = pathlib.Path(os.environ['INBOX'])
+      result = {}
+      for path in sorted(root.rglob('*')):
+          if path.is_file():
+              data = path.read_bytes()
+              name = path.relative_to(root).as_posix()
+              result[name] = {'size': len(data), 'sha256': hashlib.sha256(data).hexdigest()}
+              if name.startswith('evidence-'):
+                  result[name]['value'] = json.loads(data)
+      (pathlib.Path(os.environ['OUTBOX']) / 'downloaded-evidence.json').write_text(json.dumps(result))
+      PY
+    env:
+      INBOX: ${{ context.environment.op.inbox }}
+      OUTBOX: ${{ context.environment.op.outbox }}
 outputs:
   result: ${{ sequence.actual_wrapper.outputs.result }}
   allowed: ${{ sequence.actual_wrapper.outputs.allowed }}

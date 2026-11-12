@@ -80,6 +80,10 @@ func TestWorkerRecordedConversation(t *testing.T) {
 		t.Run(backend, func(t *testing.T) { runWorkerConversation(t, backend, false) })
 	}
 }
+func TestWorkerLegacyPendingThroughCurrentHost(t *testing.T) {
+	runWorkerConversation(t, "legacy", false)
+}
+
 func TestWorkerMembership(t *testing.T) { runWorkerConversation(t, "membership", false) }
 
 func TestWorkerMediaDownloads(t *testing.T) { runWorkerConversation(t, "media", false) }
@@ -138,7 +142,7 @@ func runWorkerConversation(t *testing.T, backend string, goalCase bool) {
 	var rt jobdb.WorkflowRuntime = toyruntime.New()
 	if backend != "toy" {
 		runtimeConfig := sqliteruntime.Config{DBPath: filepath.Join(t.TempDir(), "jobs.db")}
-		if large {
+		if large || backend == "legacy" {
 			// Product UTF-8 maxima can expand sixfold in encoded task data.
 			// Use the existing deployment capacity setting, not a runtime change.
 			runtimeConfig.MaxChapterApplicationPayloadBytes = 4 << 20
@@ -251,7 +255,7 @@ func runWorkerConversation(t *testing.T, backend string, goalCase bool) {
 			selected, _ := in["selector"].(string)
 			if selected == ModelOperation {
 				call := modelCalls.Add(1)
-				if !goalCase && !large && backend != "media" && backend != "membership" && call > 1 && !strings.Contains(string(mustJSON(in)), strings.Repeat("x", 1200)+"uploaded bytes") {
+				if !goalCase && !large && backend != "media" && backend != "membership" && backend != "legacy" && call > 1 && !strings.Contains(string(mustJSON(in)), strings.Repeat("x", 1200)+"uploaded bytes") {
 					return nil, fmt.Errorf("accepted text attachment missing from inference input")
 				}
 				if backend == "media" && call > 1 {
@@ -268,6 +272,14 @@ func runWorkerConversation(t *testing.T, backend string, goalCase bool) {
 					result := ModelResult{Text: "download these files", Documents: []Document{{Name: "plain.txt", Text: "plain bytes", MIME: "text/plain"}, {Name: "report.md", Text: "# report", MIME: "text/markdown"}, {Name: "data.json", Text: `{"ok":true}`, MIME: "application/json"}}, ReturnArtifactIDs: ids}
 					return map[string]any{"response": string(mustJSON(result)), "model": "media-fixture", "usage": map[string]any{}}, nil
 				}
+				if backend == "legacy" && call > 1 {
+					encoded := string(mustJSON(in))
+					if !strings.Contains(encoded, "legacy-upload-marker") || !strings.Contains(encoded, strings.Repeat("p", 20<<10)) {
+						return nil, fmt.Errorf("historical prompt or attachment missing from model request")
+					}
+					return map[string]any{"response": string(mustJSON(ModelResult{Text: strings.Repeat("<", 40<<10), Documents: []Document{}, ReturnArtifactIDs: []string{}})), "model": "legacy-deterministic-fixture", "usage": map[string]any{}}, nil
+				}
+
 				if large {
 					return map[string]any{"response": string(mustJSON(ModelResult{Text: strings.Repeat("<", 64<<10), Documents: []Document{}, ReturnArtifactIDs: []string{}})), "model": "large-deterministic-fixture", "usage": map[string]any{}}, nil
 				}
@@ -370,6 +382,11 @@ func runWorkerConversation(t *testing.T, backend string, goalCase bool) {
 		exerciseWorkerContextCapture(t, runctx, c, session, waitInput, &modelCalls)
 		return
 	}
+	if backend == "legacy" {
+		exerciseLegacyPendingThroughCurrentHost(t, runctx, c, session, waitInput, &modelCalls)
+		return
+	}
+
 	if goalCase {
 		current := waitInput(session.JobID)
 		var request PromptRequest
@@ -1108,4 +1125,99 @@ func configureFixtureGit(t *testing.T, admin jobdb.ConfigurationAdmin, repo stri
 			t.Fatal(err)
 		}
 	}
+}
+
+// The execution is already waiting under v2 before the v4 host is constructed.
+// This uses real SQLite, runtime input receipts and durable artifact storage;
+// registered v2 activities and deterministic model execution are fixture bounds.
+func exerciseLegacyPendingThroughCurrentHost(t *testing.T, ctx context.Context, original *Client, session Session, waitInput func(string) *input.UserInputDetails, calls *atomic.Int32) {
+	t.Helper()
+	pending := waitInput(session.JobID)
+	template, _, _ := ordinaryFacade(t)
+	cfg := template.cfg
+	cfg.Protocol = GoalProtocol
+	cfg.Recipe = "git+https://github.com/colony-2/cortex-assistant.git//discussion-goal.yaml@" + commit
+	current, err := New(original.host, cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	prompt := strings.Repeat("p", 20<<10)
+	body := []byte("legacy-upload-marker" + strings.Repeat("x", 200<<10))
+	send := input.StructuredSubmission{RequestID: *pending.Form.RequestId, SubmissionID: "legacy-current-host", Response: map[string]any{"command": "send", "prompt": prompt, "attachments": map[string]any{"legacy.txt": jobdb.NewArtifactFromBytes("legacy.txt", body)}}}
+	accepted, err := current.Respond(ctx, human, session.ID, send)
+	if err != nil || accepted.Receipt == nil || accepted.Receipt.RequestID != send.RequestID || accepted.Receipt.SubmissionID != send.SubmissionID || accepted.Receipt.Actor != human.Actor {
+		t.Fatal("historical input rejected or receipt changed", accepted, err)
+	}
+	var fresh *input.UserInputDetails
+	for ctx.Err() == nil {
+		fresh = waitInput(session.JobID)
+		if *fresh.Form.RequestId != send.RequestID {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if ctx.Err() != nil {
+		t.Fatal(ctx.Err())
+	}
+	restored, err := current.Get(ctx, human, session.ID)
+	if err != nil || restored.Limits != DefaultLimits() || restored.JobID != session.JobID {
+		t.Fatal("historical session policy/origin changed", restored.Limits, err)
+	}
+	page := restored.Replay
+	if len(page.Entries) != 4 || page.Entries[2].Text != prompt || page.Entries[3].Text != strings.Repeat("<", 40<<10) || calls.Load() != 2 || len(mustJSON(page)) <= OrdinaryLimits().Page {
+		t.Fatal("historical replay missing or reinterpreted", len(page.Entries), len(mustJSON(page)), calls.Load())
+	}
+	entry := page.Entries[2]
+	if entry.Origin.JobID != session.JobID || entry.Receipt == nil || entry.Receipt.RequestID != accepted.Receipt.RequestID || entry.Receipt.SubmissionID != accepted.Receipt.SubmissionID || len(entry.Artifacts) != 1 {
+		t.Fatal("recorded receipt/artifact origin lost", entry)
+	}
+	command, receipt, err := current.Accept(ctx, human, session.JobID)
+	if err != nil || command.Prompt != prompt || receipt == nil || receipt.RequestID != send.RequestID {
+		t.Fatal("historical accepted command changed", err)
+	}
+
+	download, err := current.OpenArtifact(ctx, human, session.ID, entry.Artifacts[0].ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := io.ReadAll(download)
+	download.Close()
+	if err != nil || string(got) != string(body) {
+		t.Fatal("historical download changed", err)
+	}
+	// Current worker-facing calls must also honor the selected historical policy.
+	assembled, _, err := current.Prompt(ctx, human, session.JobID)
+	if err != nil || !strings.Contains(assembled, "legacy-upload-marker") {
+		t.Fatal("historical prompt assembly rejected attachment", err)
+	}
+	form, err := current.Form(ctx, human, session.JobID)
+	if err != nil || string(mustJSON(form)) != string(mustJSON(mustLegacyForm(t, ctx, original, session.JobID))) {
+		t.Fatal("historical form schema changed", err)
+	}
+	finish, err := current.Respond(ctx, human, session.ID, input.StructuredSubmission{RequestID: *fresh.Form.RequestId, SubmissionID: "legacy-finish", Response: Command{Command: "finish"}})
+	if err != nil || finish.Receipt == nil {
+		t.Fatal("historical finish rejected", err)
+	}
+	for ctx.Err() == nil {
+		d, err := original.read(ctx, human, session.JobID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if d.Story.Status == story.WorkflowStatusCompleted {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if ctx.Err() != nil {
+		t.Fatal(ctx.Err())
+	}
+	writeLifecycleCase(t, "legacy-pending-current-host", map[string]any{"fixture": "real SQLite/input/durable storage; registered v2 activity; deterministic model", "descriptor": cfg.LegacyReleases, "job_id": session.JobID, "goal_id": session.GoalID, "original_request_id": send.RequestID, "next_request_id": *fresh.Form.RequestId, "receipt": accepted.Receipt, "recorded_origin": entry.Origin, "recorded_receipt": entry.Receipt, "artifact": entry.Artifacts[0], "prompt_bytes": len(prompt), "download_bytes": len(got), "download_sha256": fmt.Sprintf("%x", sha256.Sum256(got)), "expected_sha256": fmt.Sprintf("%x", sha256.Sum256(body)), "escaped_reply_bytes": 40 << 10, "encoded_page_bytes": len(mustJSON(page)), "limits": restored.Limits, "model_calls": calls.Load(), "finish_receipt": finish.Receipt})
+}
+func mustLegacyForm(t *testing.T, ctx context.Context, c *Client, job string) input.Config {
+	t.Helper()
+	form, err := c.Form(ctx, human, job)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return form
 }

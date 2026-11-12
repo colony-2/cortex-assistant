@@ -1,0 +1,23 @@
+name: cortex-assistant-discussion
+version: "3.0.0"
+description: Bounded assistant policy over actual retained c2j task results
+command: [go, run, ../../cmd/discussion-op]
+dependencies:
+  - nix:github:NixOS/nixpkgs/e7439b6b14ad3cc35d05608ebca9bce01a25f5f8#go
+input_schema:
+  type: object
+  additionalProperties: false
+  required: [action]
+  properties:
+    protocol: {enum: [cortex-assistant/3, cortex-assistant/4]}
+    prior_job: {type: string}
+    action: {enum: [capture, assemble, response, form, accept, prepare-action, dispatched]}
+    session_id: {type: string}
+    prompt: {type: string}
+    snapshot: {type: object}
+    model: {type: object}
+    artifact_outbox_path:
+      type: string
+      default: '{{ context.environment.op.outbox }}'
+output_schema:
+  type: object

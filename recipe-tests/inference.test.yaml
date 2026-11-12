@@ -1,0 +1,6 @@
+# Compiler regression only. Runtime/provider exchange is verified separately.
+recipe: ./inference-host.yaml
+cases:
+  - id: declared-secret-include
+    type: integration_case
+    inputs: {}

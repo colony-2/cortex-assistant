@@ -3,8 +3,8 @@ module github.com/colony-2/cortex-assistant
 go 1.26
 
 require (
-	github.com/colony-2/c2j v0.0.122
-	github.com/colony-2/jobdb v0.0.74
+	github.com/colony-2/c2j v0.0.125-0.20261111181458-c2193c57d890
+	github.com/colony-2/jobdb v0.0.81-0.20261110034917-7f6133791ec9
 	golang.org/x/oauth2 v0.36.0
 )
 
@@ -29,6 +29,7 @@ require (
 	github.com/colony-2/strata-go v0.0.0-20260621025934-747fa0c819c0 // indirect
 	github.com/distribution/reference v0.6.0 // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect
+	github.com/evanphx/json-patch/v5 v5.9.11 // indirect
 	github.com/fatih/structs v1.1.0 // indirect
 	github.com/fxamacker/cbor/v2 v2.9.0 // indirect
 	github.com/gabriel-vasile/mimetype v1.4.13 // indirect
