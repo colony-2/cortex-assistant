@@ -51,11 +51,13 @@ func New(h Host, cfg Config) (*Client, error) {
 		return nil, ErrInvalid
 	}
 	if ordinaryProtocol(cfg.Protocol) {
-		if cfg.Bindings == nil || cfg.Bindings.validate() != nil {
+		if (cfg.Bindings == nil && cfg.Protocol != GoalProtocol) || (cfg.Bindings != nil && cfg.Bindings.validate() != nil) {
 			return nil, ErrInvalid
 		}
-		bindings := *cfg.Bindings
-		cfg.Bindings = &bindings
+		if cfg.Bindings != nil {
+			bindings := *cfg.Bindings
+			cfg.Bindings = &bindings
+		}
 		if cfg.Limits == (Limits{}) {
 			cfg.Limits = OrdinaryLimits()
 		}

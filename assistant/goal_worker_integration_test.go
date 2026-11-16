@@ -24,6 +24,7 @@ import (
 	"github.com/colony-2/c2j/pkg/worker/compiler"
 	workerops "github.com/colony-2/c2j/pkg/worker/ops"
 	workerworkflow "github.com/colony-2/c2j/pkg/worker/workflow"
+	"github.com/colony-2/cortex-assistant/internal/turncheck"
 	"github.com/colony-2/jobdb/pkg/jobdb"
 	sqliteruntime "github.com/colony-2/jobdb/pkg/jobdb/runtime/sqlite"
 	jobworkflow "github.com/colony-2/jobdb/pkg/workflow"
@@ -46,7 +47,7 @@ func (s *lostGoalReceiptSubmitter) SubmitJobRef(ctx context.Context, job jobdb.S
 	return jobref.Ref{}, errors.New("fixture transport lost accepted receipt")
 }
 
-func exerciseGoalLifecycle(t *testing.T, ctx context.Context, facade *Client, caller Caller, old jobref.Ref, snapshot FrozenSnapshot, rt *sqliteruntime.Runtime, scoped *executionruntime.Runtime, registry *workerops.ActivityRegistry, withMedia bool, stop func(), run func(jobworkflow.Engine)) {
+func exerciseGoalLifecycle(t *testing.T, ctx context.Context, facade *Client, caller Caller, old jobref.Ref, snapshot FrozenSnapshot, rt *sqliteruntime.Runtime, scoped *executionruntime.Runtime, registry *workerops.ActivityRegistry, withMedia, expectValid bool, stop func(), run func(jobworkflow.Engine)) {
 	t.Helper()
 	ctx = jobdb.WithPrimaryGoalSelectionAuthorizer(ctx, func(_ context.Context, goal jobdb.GoalKey, target jobdb.ResolvedCell) error {
 		if goal.TenantId != caller.TenantID || goal.GoalID != old.GoalID || target.Cell != "root" {
@@ -159,6 +160,9 @@ func exerciseGoalLifecycle(t *testing.T, ctx context.Context, facade *Client, ca
 			t.Fatal("original task origins changed")
 		}
 	}
+	turnProofs := []turncheck.Evidence{}
+	finalMutation := map[string]any{}
+	finalBoundary := turncheck.Turn{}
 	downloads := []map[string]any{}
 	for _, entry := range original.Replay.Entries {
 		for _, artifact := range entry.Artifacts {
@@ -266,6 +270,9 @@ func exerciseGoalLifecycle(t *testing.T, ctx context.Context, facade *Client, ca
 	if ctx.Err() != nil {
 		t.Fatal(ctx.Err())
 	}
+	if expectValid {
+		turnProofs = append(turnProofs, requirePositiveTurn(t, ctx, api, facade, caller, old.GoalID, turncheck.Turn{JobID: next.JobID, Protocol: GoalProtocol, Receipt: receipt.Receipt}))
+	}
 	retried, err := facade.Respond(ctx, caller, old.GoalID, submission)
 	if err != nil || string(mustJSON(retried)) != string(mustJSON(receipt)) {
 		t.Fatal("reopen send lost authoritative receipt", err)
@@ -353,7 +360,7 @@ func exerciseGoalLifecycle(t *testing.T, ctx context.Context, facade *Client, ca
 			t.Fatal(ctx.Err())
 		}
 		thirdRequest := *ready.Current.Form.RequestId
-		_, e = facade.Respond(ctx, caller, old.GoalID, input.StructuredSubmission{RequestID: thirdRequest, SubmissionID: "retained-media-followup", Response: map[string]any{"command": "send", "prompt": "follow up with retained media context"}})
+		thirdReceipt, e := facade.Respond(ctx, caller, old.GoalID, input.StructuredSubmission{RequestID: thirdRequest, SubmissionID: "retained-media-followup", Response: map[string]any{"command": "send", "prompt": "follow up with retained media context"}})
 		if e != nil {
 			t.Fatal(e)
 		}
@@ -366,6 +373,26 @@ func exerciseGoalLifecycle(t *testing.T, ctx context.Context, facade *Client, ca
 		}
 		if ctx.Err() != nil {
 			t.Fatal(ctx.Err())
+		}
+
+		finalTurn := turncheck.Turn{JobID: third.JobID, Protocol: GoalProtocol, Receipt: thirdReceipt.Receipt}
+		finalBoundary = finalTurn
+		if os.Getenv("ASSISTANT_FORGE_FINAL_CITATION") == "1" {
+			negativeProof, checkErr := positiveTurn(ctx, api, facade, caller, old.GoalID, finalTurn)
+			want := "missing valid reply in job " + third.JobID + " after " + thirdRequest + "/retained-media-followup"
+			if !errors.Is(checkErr, turncheck.ErrMissingValidReply) || checkErr.Error() != want {
+				t.Fatalf("mutation rejected for wrong reason: %v", checkErr)
+			}
+			if ready.Current.Form.Request == nil {
+				t.Fatal("missing safe next input")
+			}
+			var prompt PromptRequest
+			if decode(*ready.Current.Form.Request, &prompt) != nil || prompt.Assistant.Error != "The model response could not be validated." {
+				t.Fatal("mutation lacks real validation failure")
+			}
+			finalMutation = map[string]any{"turn": finalTurn, "turn_evidence": negativeProof, "safe_form": ready.Current.Form, "positive_check_error": checkErr.Error(), "validation_error": prompt.Assistant.Error, "safe_next_request": *ready.Current.Form.RequestId}
+		} else {
+			turnProofs = append(turnProofs, requirePositiveTurn(t, ctx, api, facade, caller, old.GoalID, finalTurn))
 		}
 		seen := map[string]bool{}
 		for _, entry := range ready.Replay.Entries {
@@ -398,7 +425,7 @@ func exerciseGoalLifecycle(t *testing.T, ctx context.Context, facade *Client, ca
 		if err = os.MkdirAll(directory, 0755); err != nil {
 			t.Fatal(err)
 		}
-		evidence := map[string]any{"ambiguous_submit_recovery": ambiguousRecovery, "concurrent_send_outcomes": concurrentOutcomes, "worker_replacements": workerReplacements, "original": original, "reopened": ready, "receipt": receipt, "old_job": old, "new_job": next, "counts": counts, "downloads": downloads, "fixture_boundary": "Real ordinary resolved helper and inference package; provider success uses trusted loopback HTTP fixture, missing-secret case records a safe error. See paired provider request evidence when present."}
+		evidence := map[string]any{"final_turn": finalBoundary, "turn_proofs": turnProofs, "final_citation_mutation": finalMutation, "ambiguous_submit_recovery": ambiguousRecovery, "concurrent_send_outcomes": concurrentOutcomes, "worker_replacements": workerReplacements, "original": original, "reopened": ready, "receipt": receipt, "old_job": old, "new_job": next, "counts": counts, "downloads": downloads, "fixture_boundary": "Real ordinary resolved helper and inference package; provider success uses trusted loopback HTTP fixture, missing-secret case records a safe error. See paired provider request evidence when present."}
 		if err = os.WriteFile(filepath.Join(directory, "sequential-reopen.json"), mustJSON(evidence), 0600); err != nil {
 			t.Fatal(err)
 		}

@@ -1,0 +1,114 @@
+{
+  "name": "pydantic",
+  "description": "Directly bound, isolated OpenAI structured inference through PydanticAI",
+  "command": [
+    "bin/pydantic"
+  ],
+  "env": {
+    "PYTHONDONTWRITEBYTECODE": "1",
+    "PYTHONUNBUFFERED": "1",
+    "PYDANTIC_AI_NO_BANNER": "1"
+  },
+  "input_schema": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": [
+      "api",
+      "default_provider",
+      "default_model",
+      "response_schema",
+      "invocation_timeout",
+      "prompt"
+    ],
+    "properties": {
+      "api": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "base_url",
+          "api_key"
+        ],
+        "properties": {
+          "base_url": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "^[^\\s\\x00-\\x1f\\x7f]+$"
+          },
+          "api_key": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "^[^\\s\\x00-\\x1f\\x7f]+$",
+            "x-secret": true
+          }
+        }
+      },
+      "default_provider": {
+        "const": "openai",
+        "type": "string"
+      },
+      "default_model": {
+        "type": "string",
+        "minLength": 1,
+        "pattern": "^[^\\s:/\\x00-\\x1f\\x7f]+$"
+      },
+      "response_schema": {
+        "type": "object"
+      },
+      "invocation_timeout": {
+        "type": "number",
+        "exclusiveMinimum": 0
+      },
+      "prompt": {
+        "type": "string",
+        "minLength": 1
+      },
+      "system_prompt": {
+        "type": "string"
+      },
+      "temperature": {
+        "type": "number"
+      },
+      "top_p": {
+        "type": "number"
+      },
+      "max_tokens": {
+        "type": "integer",
+        "minimum": 1
+      },
+      "stop_sequences": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        }
+      },
+      "metadata": {
+        "type": "object"
+      }
+    }
+  },
+  "output_schema": {
+    "type": "object",
+    "required": [
+      "response",
+      "model",
+      "usage"
+    ],
+    "properties": {
+      "response": {
+        "type": "string"
+      },
+      "model": {
+        "type": "string"
+      },
+      "usage": {
+        "type": "object"
+      },
+      "provider_metadata": {
+        "type": "object"
+      },
+      "execution_time_ms": {
+        "type": "integer"
+      }
+    }
+  }
+}

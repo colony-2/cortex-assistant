@@ -1,6 +1,343 @@
-# Compiler regression only. Runtime/provider exchange is verified separately.
-recipe: ./inference-host.yaml
-cases:
-  - id: declared-secret-include
-    type: integration_case
-    inputs: {}
+{
+  "recipe": "./inference-host.yaml",
+  "cases": [
+    {
+      "id": "declared-secret-include",
+      "type": "integration_case",
+      "runtime": {
+        "cells": {
+          "root": {
+            "file_sources": {
+              "assistant/lineage.go": "../assistant/lineage.go",
+              "assistant/replay.go": "../assistant/replay.go",
+              "assistant/ordinary_client.go": "../assistant/ordinary_client.go",
+              "assistant/goal_records.go": "../assistant/goal_records.go",
+              "assistant/goal_unstarted.go": "../assistant/goal_unstarted.go",
+              "assistant/ordinary.go": "../assistant/ordinary.go",
+              "assistant/ordinary_attachments.go": "../assistant/ordinary_attachments.go",
+              "assistant/registration.go": "../assistant/registration.go",
+              "assistant/dispatch_discovery.go": "../assistant/dispatch_discovery.go",
+              "assistant/discovery.go": "../assistant/discovery.go",
+              "assistant/activity.go": "../assistant/activity.go",
+              "assistant/validate.go": "../assistant/validate.go",
+              "assistant/contextual_bindings.go": "../assistant/contextual_bindings.go",
+              "assistant/ordinary_dispatch.go": "../assistant/ordinary_dispatch.go",
+              "assistant/tasks.go": "../assistant/tasks.go",
+              "assistant/uploads.go": "../assistant/uploads.go",
+              "assistant/goal_lifecycle.go": "../assistant/goal_lifecycle.go",
+              "assistant/client.go": "../assistant/client.go",
+              "assistant/types.go": "../assistant/types.go",
+              "assistant/snapshot.go": "../assistant/snapshot.go",
+              "assistant/releases.go": "../assistant/releases.go",
+              "assistant/frozen_start.go": "../assistant/frozen_start.go",
+              "go.mod": "../go.mod",
+              "go.sum": "../go.sum",
+              "cmd/bindings-op/main.go": "../cmd/bindings-op/main.go",
+              "cmd/discussion-op/main.go": "../cmd/discussion-op/main.go",
+              "ops/bindings/op.yaml": "../ops/bindings/op.yaml",
+              "ops/discussion/op.yaml": "../ops/discussion/op.yaml"
+            }
+          }
+        },
+        "secrets": {
+          "codex_api_key": "synthetic-native-only"
+        }
+      },
+      "inputs": {},
+      "mocks": {
+        "ops": [
+          {
+            "match": {
+              "selector": "nix:github:colony-2/c2ops/6396e1fe6462084e85ea44d86d372bdf3b133db0#pydantic",
+              "node_path": "assistant-binding-host/inference/cortex-assistant-inference/infer"
+            },
+            "behavior": {
+              "mode": "return",
+              "outputs": {
+                "response": "{\"text\":\"fixture\"}",
+                "model": "fixture",
+                "usage": {}
+              }
+            }
+          },
+          {
+            "match": {
+              "node_path": "assistant-binding-host/inference/cortex-assistant-inference/policy"
+            },
+            "behavior": {
+              "mode": "passthrough"
+            },
+            "repeat": true
+          }
+        ]
+      },
+      "assertions": [
+        {
+          "type": "op_call_count",
+          "node_path": "assistant-binding-host/inference/cortex-assistant-inference/infer",
+          "value": 1
+        },
+        {
+          "type": "op_input_equals",
+          "node_path": "assistant-binding-host/inference/cortex-assistant-inference/infer",
+          "path": "inputs.api.base_url",
+          "value": "https://fixture.invalid/exact/root"
+        }
+      ]
+    },
+    {
+      "id": "declared-secret-other-workspace",
+      "type": "integration_case",
+      "runtime": {
+        "cells": {
+          "root": {
+            "file_sources": {
+              "assistant/lineage.go": "../assistant/lineage.go",
+              "assistant/replay.go": "../assistant/replay.go",
+              "assistant/ordinary_client.go": "../assistant/ordinary_client.go",
+              "assistant/goal_records.go": "../assistant/goal_records.go",
+              "assistant/goal_unstarted.go": "../assistant/goal_unstarted.go",
+              "assistant/ordinary.go": "../assistant/ordinary.go",
+              "assistant/ordinary_attachments.go": "../assistant/ordinary_attachments.go",
+              "assistant/registration.go": "../assistant/registration.go",
+              "assistant/dispatch_discovery.go": "../assistant/dispatch_discovery.go",
+              "assistant/discovery.go": "../assistant/discovery.go",
+              "assistant/activity.go": "../assistant/activity.go",
+              "assistant/validate.go": "../assistant/validate.go",
+              "assistant/contextual_bindings.go": "../assistant/contextual_bindings.go",
+              "assistant/ordinary_dispatch.go": "../assistant/ordinary_dispatch.go",
+              "assistant/tasks.go": "../assistant/tasks.go",
+              "assistant/uploads.go": "../assistant/uploads.go",
+              "assistant/goal_lifecycle.go": "../assistant/goal_lifecycle.go",
+              "assistant/client.go": "../assistant/client.go",
+              "assistant/types.go": "../assistant/types.go",
+              "assistant/snapshot.go": "../assistant/snapshot.go",
+              "assistant/releases.go": "../assistant/releases.go",
+              "assistant/frozen_start.go": "../assistant/frozen_start.go",
+              "go.mod": "../go.mod",
+              "go.sum": "../go.sum",
+              "cmd/bindings-op/main.go": "../cmd/bindings-op/main.go",
+              "cmd/discussion-op/main.go": "../cmd/discussion-op/main.go",
+              "ops/bindings/op.yaml": "../ops/bindings/op.yaml",
+              "ops/discussion/op.yaml": "../ops/discussion/op.yaml"
+            }
+          },
+          "other": {
+            "file_sources": {
+              "assistant/lineage.go": "../assistant/lineage.go",
+              "assistant/replay.go": "../assistant/replay.go",
+              "assistant/ordinary_client.go": "../assistant/ordinary_client.go",
+              "assistant/goal_records.go": "../assistant/goal_records.go",
+              "assistant/goal_unstarted.go": "../assistant/goal_unstarted.go",
+              "assistant/ordinary.go": "../assistant/ordinary.go",
+              "assistant/ordinary_attachments.go": "../assistant/ordinary_attachments.go",
+              "assistant/registration.go": "../assistant/registration.go",
+              "assistant/dispatch_discovery.go": "../assistant/dispatch_discovery.go",
+              "assistant/discovery.go": "../assistant/discovery.go",
+              "assistant/activity.go": "../assistant/activity.go",
+              "assistant/validate.go": "../assistant/validate.go",
+              "assistant/contextual_bindings.go": "../assistant/contextual_bindings.go",
+              "assistant/ordinary_dispatch.go": "../assistant/ordinary_dispatch.go",
+              "assistant/tasks.go": "../assistant/tasks.go",
+              "assistant/uploads.go": "../assistant/uploads.go",
+              "assistant/goal_lifecycle.go": "../assistant/goal_lifecycle.go",
+              "assistant/client.go": "../assistant/client.go",
+              "assistant/types.go": "../assistant/types.go",
+              "assistant/snapshot.go": "../assistant/snapshot.go",
+              "assistant/releases.go": "../assistant/releases.go",
+              "assistant/frozen_start.go": "../assistant/frozen_start.go",
+              "go.mod": "../go.mod",
+              "go.sum": "../go.sum",
+              "cmd/bindings-op/main.go": "../cmd/bindings-op/main.go",
+              "cmd/discussion-op/main.go": "../cmd/discussion-op/main.go",
+              "ops/bindings/op.yaml": "../ops/bindings/op.yaml",
+              "ops/discussion/op.yaml": "../ops/discussion/op.yaml"
+            }
+          }
+        },
+        "secrets": {
+          "codex_api_key": "synthetic-native-only"
+        },
+        "cell": "other"
+      },
+      "inputs": {},
+      "mocks": {
+        "ops": [
+          {
+            "match": {
+              "selector": "nix:github:colony-2/c2ops/6396e1fe6462084e85ea44d86d372bdf3b133db0#pydantic",
+              "node_path": "assistant-binding-host/inference/cortex-assistant-inference/infer"
+            },
+            "behavior": {
+              "mode": "return",
+              "outputs": {
+                "response": "{\"text\":\"fixture\"}",
+                "model": "fixture",
+                "usage": {}
+              }
+            }
+          },
+          {
+            "match": {
+              "node_path": "assistant-binding-host/inference/cortex-assistant-inference/policy"
+            },
+            "behavior": {
+              "mode": "passthrough"
+            },
+            "repeat": true
+          }
+        ]
+      },
+      "assertions": [
+        {
+          "type": "op_call_count",
+          "node_path": "assistant-binding-host/inference/cortex-assistant-inference/infer",
+          "value": 1
+        },
+        {
+          "type": "op_input_equals",
+          "node_path": "assistant-binding-host/inference/cortex-assistant-inference/infer",
+          "path": "inputs.api.base_url",
+          "value": "https://fixture.invalid/exact/root"
+        }
+      ]
+    },
+    {
+      "id": "missing-key",
+      "type": "integration_case",
+      "runtime": {
+        "cells": {
+          "root": {
+            "file_sources": {
+              "assistant/lineage.go": "../assistant/lineage.go",
+              "assistant/replay.go": "../assistant/replay.go",
+              "assistant/ordinary_client.go": "../assistant/ordinary_client.go",
+              "assistant/goal_records.go": "../assistant/goal_records.go",
+              "assistant/goal_unstarted.go": "../assistant/goal_unstarted.go",
+              "assistant/ordinary.go": "../assistant/ordinary.go",
+              "assistant/ordinary_attachments.go": "../assistant/ordinary_attachments.go",
+              "assistant/registration.go": "../assistant/registration.go",
+              "assistant/dispatch_discovery.go": "../assistant/dispatch_discovery.go",
+              "assistant/discovery.go": "../assistant/discovery.go",
+              "assistant/activity.go": "../assistant/activity.go",
+              "assistant/validate.go": "../assistant/validate.go",
+              "assistant/contextual_bindings.go": "../assistant/contextual_bindings.go",
+              "assistant/ordinary_dispatch.go": "../assistant/ordinary_dispatch.go",
+              "assistant/tasks.go": "../assistant/tasks.go",
+              "assistant/uploads.go": "../assistant/uploads.go",
+              "assistant/goal_lifecycle.go": "../assistant/goal_lifecycle.go",
+              "assistant/client.go": "../assistant/client.go",
+              "assistant/types.go": "../assistant/types.go",
+              "assistant/snapshot.go": "../assistant/snapshot.go",
+              "assistant/releases.go": "../assistant/releases.go",
+              "assistant/frozen_start.go": "../assistant/frozen_start.go",
+              "go.mod": "../go.mod",
+              "go.sum": "../go.sum",
+              "cmd/bindings-op/main.go": "../cmd/bindings-op/main.go",
+              "cmd/discussion-op/main.go": "../cmd/discussion-op/main.go",
+              "ops/bindings/op.yaml": "../ops/bindings/op.yaml",
+              "ops/discussion/op.yaml": "../ops/discussion/op.yaml"
+            }
+          }
+        },
+        "secrets": {}
+      },
+      "inputs": {},
+      "mocks": {
+        "ops": [
+          {
+            "match": {
+              "node_path": "assistant-binding-host/inference/cortex-assistant-inference/policy"
+            },
+            "behavior": {
+              "mode": "passthrough"
+            },
+            "repeat": true
+          }
+        ]
+      },
+      "assertions": [
+        {
+          "type": "op_call_count",
+          "node_path": "assistant-binding-host/inference/cortex-assistant-inference/infer",
+          "value": 0
+        }
+      ],
+      "expect_error": "required secret unavailable"
+    },
+    {
+      "id": "empty-key",
+      "type": "integration_case",
+      "runtime": {
+        "cells": {
+          "root": {
+            "file_sources": {
+              "assistant/lineage.go": "../assistant/lineage.go",
+              "assistant/replay.go": "../assistant/replay.go",
+              "assistant/ordinary_client.go": "../assistant/ordinary_client.go",
+              "assistant/goal_records.go": "../assistant/goal_records.go",
+              "assistant/goal_unstarted.go": "../assistant/goal_unstarted.go",
+              "assistant/ordinary.go": "../assistant/ordinary.go",
+              "assistant/ordinary_attachments.go": "../assistant/ordinary_attachments.go",
+              "assistant/registration.go": "../assistant/registration.go",
+              "assistant/dispatch_discovery.go": "../assistant/dispatch_discovery.go",
+              "assistant/discovery.go": "../assistant/discovery.go",
+              "assistant/activity.go": "../assistant/activity.go",
+              "assistant/validate.go": "../assistant/validate.go",
+              "assistant/contextual_bindings.go": "../assistant/contextual_bindings.go",
+              "assistant/ordinary_dispatch.go": "../assistant/ordinary_dispatch.go",
+              "assistant/tasks.go": "../assistant/tasks.go",
+              "assistant/uploads.go": "../assistant/uploads.go",
+              "assistant/goal_lifecycle.go": "../assistant/goal_lifecycle.go",
+              "assistant/client.go": "../assistant/client.go",
+              "assistant/types.go": "../assistant/types.go",
+              "assistant/snapshot.go": "../assistant/snapshot.go",
+              "assistant/releases.go": "../assistant/releases.go",
+              "assistant/frozen_start.go": "../assistant/frozen_start.go",
+              "go.mod": "../go.mod",
+              "go.sum": "../go.sum",
+              "cmd/bindings-op/main.go": "../cmd/bindings-op/main.go",
+              "cmd/discussion-op/main.go": "../cmd/discussion-op/main.go",
+              "ops/bindings/op.yaml": "../ops/bindings/op.yaml",
+              "ops/discussion/op.yaml": "../ops/discussion/op.yaml"
+            }
+          }
+        },
+        "secrets": {
+          "codex_api_key": ""
+        }
+      },
+      "inputs": {},
+      "mocks": {
+        "ops": [
+          {
+            "match": {
+              "node_path": "assistant-binding-host/inference/cortex-assistant-inference/policy"
+            },
+            "behavior": {
+              "mode": "passthrough"
+            },
+            "repeat": true
+          },
+          {
+            "match": {
+              "selector": "nix:github:colony-2/c2ops/6396e1fe6462084e85ea44d86d372bdf3b133db0#pydantic",
+              "node_path": "assistant-binding-host/inference/cortex-assistant-inference/infer"
+            },
+            "behavior": {
+              "mode": "passthrough"
+            }
+          }
+        ]
+      },
+      "assertions": [
+        {
+          "type": "op_call_count",
+          "node_path": "assistant-binding-host/inference/cortex-assistant-inference/infer",
+          "value": 1
+        }
+      ],
+      "expect_error": "at '/api/api_key': minLength: got 0, want 1"
+    }
+  ]
+}

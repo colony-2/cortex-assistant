@@ -1,0 +1,2424 @@
+{
+  "recipe": "../discussion-goal.yaml",
+  "cases": [
+    {
+      "id": "goal-contextual",
+      "type": "integration_case",
+      "inputs": {
+        "protocol": "cortex-assistant/4",
+        "session_id": "native",
+        "prompt": "open",
+        "snapshot": {
+          "tenant_id": "0",
+          "source": {
+            "kind": "global"
+          },
+          "at": "2026-11-11T00:00:00Z",
+          "documents": []
+        },
+        "base_url": {
+          "$c2j_ref": {
+            "kind": "config",
+            "name": "codex_api_base_url",
+            "type": "string"
+          }
+        },
+        "model": {
+          "$c2j_ref": {
+            "kind": "config",
+            "name": "codex_model",
+            "type": "string"
+          }
+        },
+        "provider": "openai",
+        "api_key": {
+          "$c2j_secret": "codex_api_key"
+        }
+      },
+      "runtime": {
+        "backend": "sqlite",
+        "cells": {
+          "root": {
+            "file_sources": {
+              "assistant/lineage.go": "../assistant/lineage.go",
+              "assistant/replay.go": "../assistant/replay.go",
+              "assistant/ordinary_client.go": "../assistant/ordinary_client.go",
+              "assistant/goal_records.go": "../assistant/goal_records.go",
+              "assistant/goal_unstarted.go": "../assistant/goal_unstarted.go",
+              "assistant/ordinary.go": "../assistant/ordinary.go",
+              "assistant/ordinary_attachments.go": "../assistant/ordinary_attachments.go",
+              "assistant/registration.go": "../assistant/registration.go",
+              "assistant/dispatch_discovery.go": "../assistant/dispatch_discovery.go",
+              "assistant/discovery.go": "../assistant/discovery.go",
+              "assistant/activity.go": "../assistant/activity.go",
+              "assistant/validate.go": "../assistant/validate.go",
+              "assistant/contextual_bindings.go": "../assistant/contextual_bindings.go",
+              "assistant/ordinary_dispatch.go": "../assistant/ordinary_dispatch.go",
+              "assistant/tasks.go": "../assistant/tasks.go",
+              "assistant/uploads.go": "../assistant/uploads.go",
+              "assistant/goal_lifecycle.go": "../assistant/goal_lifecycle.go",
+              "assistant/client.go": "../assistant/client.go",
+              "assistant/types.go": "../assistant/types.go",
+              "assistant/snapshot.go": "../assistant/snapshot.go",
+              "assistant/releases.go": "../assistant/releases.go",
+              "assistant/frozen_start.go": "../assistant/frozen_start.go",
+              "go.mod": "../go.mod",
+              "go.sum": "../go.sum",
+              "cmd/bindings-op/main.go": "../cmd/bindings-op/main.go",
+              "cmd/discussion-op/main.go": "../cmd/discussion-op/main.go",
+              "ops/bindings/op.yaml": "../ops/bindings/op.yaml",
+              "ops/discussion/op.yaml": "../ops/discussion/op.yaml"
+            }
+          }
+        },
+        "config": {
+          "codex_api_base_url": "https://native.invalid/exact/root",
+          "codex_model": "native-model"
+        },
+        "secrets": {
+          "codex_api_key": "synthetic-native-only"
+        },
+        "responses": [
+          {
+            "node_path": "cortex-assistant-session/prompt/sequence/await-human",
+            "response": {
+              "command": "finish"
+            }
+          }
+        ],
+        "controls": {
+          "barriers": [
+            {
+              "id": "after-form",
+              "match": {
+                "selector": "./ops/discussion",
+                "node_path": "cortex-assistant-session/prompt/sequence/accept",
+                "cell": "root",
+                "occurrence": 1,
+                "attempt": 1
+              }
+            }
+          ],
+          "actions": [
+            {
+              "on": "after-form.entered",
+              "do": "cancel_job"
+            }
+          ]
+        }
+      },
+      "mocks": {
+        "ops": [
+          {
+            "match": {
+              "node_path": "cortex-assistant-session/capture/sequence/capture"
+            },
+            "behavior": {
+              "mode": "passthrough"
+            },
+            "repeat": true
+          },
+          {
+            "match": {
+              "node_path": "cortex-assistant-session/infer/sequence/assemble"
+            },
+            "behavior": {
+              "mode": "passthrough"
+            },
+            "repeat": true
+          },
+          {
+            "match": {
+              "node_path": "cortex-assistant-session/infer/sequence/response"
+            },
+            "behavior": {
+              "mode": "passthrough"
+            },
+            "repeat": true
+          },
+          {
+            "match": {
+              "node_path": "cortex-assistant-session/prompt/sequence/form"
+            },
+            "behavior": {
+              "mode": "passthrough"
+            },
+            "repeat": true
+          },
+          {
+            "match": {
+              "node_path": "cortex-assistant-session/infer/sequence/infer/cortex-assistant-inference/policy"
+            },
+            "behavior": {
+              "mode": "passthrough"
+            },
+            "repeat": true
+          },
+          {
+            "match": {
+              "selector": "nix:github:colony-2/c2ops/6396e1fe6462084e85ea44d86d372bdf3b133db0#pydantic",
+              "node_path": "cortex-assistant-session/infer/sequence/infer/cortex-assistant-inference/infer"
+            },
+            "behavior": {
+              "mode": "return",
+              "outputs": {
+                "response": "{\"text\": \"native valid reply\", \"documents\": [], \"return_artifact_ids\": [], \"citations\": []}",
+                "model": "fixture",
+                "usage": {}
+              }
+            }
+          }
+        ]
+      },
+      "assertions": [
+        {
+          "type": "op_call_count",
+          "node_path": "cortex-assistant-session/infer/sequence/infer/cortex-assistant-inference/infer",
+          "value": 1
+        },
+        {
+          "type": "cel_true",
+          "expr": "controls.complete && controls.final.status == \"CANCELLED\""
+        },
+        {
+          "type": "cel_true",
+          "expr": "calls.exists(c, c.node_path == \"cortex-assistant-session/prompt/sequence/form\" && c.outputs.form.response_schema != null)"
+        },
+        {
+          "type": "cel_true",
+          "expr": "calls.exists(c, c.node_path == \"cortex-assistant-session/infer/sequence/response\" && c.outputs.response.text == \"native valid reply\" && c.outputs.origin.job_id == c.job_id)"
+        },
+        {
+          "type": "cel_true",
+          "expr": "calls.exists(c, c.node_path == \"cortex-assistant-session/prompt/sequence/form\" && c.outputs.form.request.assistant.text == \"native valid reply\")"
+        }
+      ]
+    },
+    {
+      "id": "goal-explicit",
+      "type": "integration_case",
+      "inputs": {
+        "protocol": "cortex-assistant/4",
+        "session_id": "native",
+        "prompt": "open",
+        "snapshot": {
+          "tenant_id": "0",
+          "source": {
+            "kind": "global"
+          },
+          "at": "2026-11-11T00:00:00Z",
+          "documents": []
+        },
+        "base_url": "https://explicit.invalid/exact/%2f/",
+        "model": "explicit-model",
+        "provider": "openai",
+        "api_key": {
+          "$c2j_secret": "codex_api_key"
+        }
+      },
+      "runtime": {
+        "backend": "sqlite",
+        "cells": {
+          "root": {
+            "file_sources": {
+              "assistant/lineage.go": "../assistant/lineage.go",
+              "assistant/replay.go": "../assistant/replay.go",
+              "assistant/ordinary_client.go": "../assistant/ordinary_client.go",
+              "assistant/goal_records.go": "../assistant/goal_records.go",
+              "assistant/goal_unstarted.go": "../assistant/goal_unstarted.go",
+              "assistant/ordinary.go": "../assistant/ordinary.go",
+              "assistant/ordinary_attachments.go": "../assistant/ordinary_attachments.go",
+              "assistant/registration.go": "../assistant/registration.go",
+              "assistant/dispatch_discovery.go": "../assistant/dispatch_discovery.go",
+              "assistant/discovery.go": "../assistant/discovery.go",
+              "assistant/activity.go": "../assistant/activity.go",
+              "assistant/validate.go": "../assistant/validate.go",
+              "assistant/contextual_bindings.go": "../assistant/contextual_bindings.go",
+              "assistant/ordinary_dispatch.go": "../assistant/ordinary_dispatch.go",
+              "assistant/tasks.go": "../assistant/tasks.go",
+              "assistant/uploads.go": "../assistant/uploads.go",
+              "assistant/goal_lifecycle.go": "../assistant/goal_lifecycle.go",
+              "assistant/client.go": "../assistant/client.go",
+              "assistant/types.go": "../assistant/types.go",
+              "assistant/snapshot.go": "../assistant/snapshot.go",
+              "assistant/releases.go": "../assistant/releases.go",
+              "assistant/frozen_start.go": "../assistant/frozen_start.go",
+              "go.mod": "../go.mod",
+              "go.sum": "../go.sum",
+              "cmd/bindings-op/main.go": "../cmd/bindings-op/main.go",
+              "cmd/discussion-op/main.go": "../cmd/discussion-op/main.go",
+              "ops/bindings/op.yaml": "../ops/bindings/op.yaml",
+              "ops/discussion/op.yaml": "../ops/discussion/op.yaml"
+            }
+          }
+        },
+        "config": {
+          "codex_api_base_url": "https://native.invalid/exact/root",
+          "codex_model": "native-model"
+        },
+        "secrets": {
+          "codex_api_key": "synthetic-native-only"
+        },
+        "responses": [
+          {
+            "node_path": "cortex-assistant-session/prompt/sequence/await-human",
+            "response": {
+              "command": "finish"
+            }
+          }
+        ],
+        "controls": {
+          "barriers": [
+            {
+              "id": "after-form",
+              "match": {
+                "selector": "./ops/discussion",
+                "node_path": "cortex-assistant-session/prompt/sequence/accept",
+                "cell": "root",
+                "occurrence": 1,
+                "attempt": 1
+              }
+            }
+          ],
+          "actions": [
+            {
+              "on": "after-form.entered",
+              "do": "cancel_job"
+            }
+          ]
+        }
+      },
+      "mocks": {
+        "ops": [
+          {
+            "match": {
+              "node_path": "cortex-assistant-session/capture/sequence/capture"
+            },
+            "behavior": {
+              "mode": "passthrough"
+            },
+            "repeat": true
+          },
+          {
+            "match": {
+              "node_path": "cortex-assistant-session/infer/sequence/assemble"
+            },
+            "behavior": {
+              "mode": "passthrough"
+            },
+            "repeat": true
+          },
+          {
+            "match": {
+              "node_path": "cortex-assistant-session/infer/sequence/response"
+            },
+            "behavior": {
+              "mode": "passthrough"
+            },
+            "repeat": true
+          },
+          {
+            "match": {
+              "node_path": "cortex-assistant-session/prompt/sequence/form"
+            },
+            "behavior": {
+              "mode": "passthrough"
+            },
+            "repeat": true
+          },
+          {
+            "match": {
+              "node_path": "cortex-assistant-session/infer/sequence/infer/cortex-assistant-inference/policy"
+            },
+            "behavior": {
+              "mode": "passthrough"
+            },
+            "repeat": true
+          },
+          {
+            "match": {
+              "selector": "nix:github:colony-2/c2ops/6396e1fe6462084e85ea44d86d372bdf3b133db0#pydantic",
+              "node_path": "cortex-assistant-session/infer/sequence/infer/cortex-assistant-inference/infer"
+            },
+            "behavior": {
+              "mode": "return",
+              "outputs": {
+                "response": "{\"text\": \"native valid reply\", \"documents\": [], \"return_artifact_ids\": [], \"citations\": []}",
+                "model": "fixture",
+                "usage": {}
+              }
+            }
+          }
+        ]
+      },
+      "assertions": [
+        {
+          "type": "op_call_count",
+          "node_path": "cortex-assistant-session/infer/sequence/infer/cortex-assistant-inference/infer",
+          "value": 1
+        },
+        {
+          "type": "cel_true",
+          "expr": "controls.complete && controls.final.status == \"CANCELLED\""
+        },
+        {
+          "type": "cel_true",
+          "expr": "calls.exists(c, c.node_path == \"cortex-assistant-session/prompt/sequence/form\" && c.outputs.form.response_schema != null)"
+        },
+        {
+          "type": "cel_true",
+          "expr": "calls.exists(c, c.node_path == \"cortex-assistant-session/infer/sequence/response\" && c.outputs.response.text == \"native valid reply\" && c.outputs.origin.job_id == c.job_id)"
+        },
+        {
+          "type": "cel_true",
+          "expr": "calls.exists(c, c.node_path == \"cortex-assistant-session/prompt/sequence/form\" && c.outputs.form.request.assistant.text == \"native valid reply\")"
+        }
+      ]
+    },
+    {
+      "id": "goal-malformed",
+      "type": "integration_case",
+      "inputs": {
+        "protocol": "cortex-assistant/4",
+        "session_id": "native",
+        "prompt": "open",
+        "snapshot": {
+          "tenant_id": "0",
+          "source": {
+            "kind": "global"
+          },
+          "at": "2026-11-11T00:00:00Z",
+          "documents": []
+        },
+        "base_url": {
+          "$c2j_ref": {
+            "kind": "config",
+            "name": "codex_api_base_url",
+            "type": "string"
+          }
+        },
+        "model": {
+          "$c2j_ref": {
+            "kind": "config",
+            "name": "codex_model",
+            "type": "string"
+          }
+        },
+        "provider": "openai",
+        "api_key": {
+          "$c2j_secret": "codex_api_key"
+        }
+      },
+      "runtime": {
+        "backend": "sqlite",
+        "cells": {
+          "root": {
+            "file_sources": {
+              "assistant/lineage.go": "../assistant/lineage.go",
+              "assistant/replay.go": "../assistant/replay.go",
+              "assistant/ordinary_client.go": "../assistant/ordinary_client.go",
+              "assistant/goal_records.go": "../assistant/goal_records.go",
+              "assistant/goal_unstarted.go": "../assistant/goal_unstarted.go",
+              "assistant/ordinary.go": "../assistant/ordinary.go",
+              "assistant/ordinary_attachments.go": "../assistant/ordinary_attachments.go",
+              "assistant/registration.go": "../assistant/registration.go",
+              "assistant/dispatch_discovery.go": "../assistant/dispatch_discovery.go",
+              "assistant/discovery.go": "../assistant/discovery.go",
+              "assistant/activity.go": "../assistant/activity.go",
+              "assistant/validate.go": "../assistant/validate.go",
+              "assistant/contextual_bindings.go": "../assistant/contextual_bindings.go",
+              "assistant/ordinary_dispatch.go": "../assistant/ordinary_dispatch.go",
+              "assistant/tasks.go": "../assistant/tasks.go",
+              "assistant/uploads.go": "../assistant/uploads.go",
+              "assistant/goal_lifecycle.go": "../assistant/goal_lifecycle.go",
+              "assistant/client.go": "../assistant/client.go",
+              "assistant/types.go": "../assistant/types.go",
+              "assistant/snapshot.go": "../assistant/snapshot.go",
+              "assistant/releases.go": "../assistant/releases.go",
+              "assistant/frozen_start.go": "../assistant/frozen_start.go",
+              "go.mod": "../go.mod",
+              "go.sum": "../go.sum",
+              "cmd/bindings-op/main.go": "../cmd/bindings-op/main.go",
+              "cmd/discussion-op/main.go": "../cmd/discussion-op/main.go",
+              "ops/bindings/op.yaml": "../ops/bindings/op.yaml",
+              "ops/discussion/op.yaml": "../ops/discussion/op.yaml"
+            }
+          }
+        },
+        "config": {
+          "codex_api_base_url": "https://native.invalid/exact/root",
+          "codex_model": "native-model"
+        },
+        "secrets": {
+          "codex_api_key": "synthetic-native-only"
+        },
+        "responses": [
+          {
+            "node_path": "cortex-assistant-session/prompt/sequence/await-human",
+            "response": {
+              "command": "finish"
+            }
+          }
+        ],
+        "controls": {
+          "barriers": [
+            {
+              "id": "after-form",
+              "match": {
+                "selector": "./ops/discussion",
+                "node_path": "cortex-assistant-session/prompt/sequence/accept",
+                "cell": "root",
+                "occurrence": 1,
+                "attempt": 1
+              }
+            }
+          ],
+          "actions": [
+            {
+              "on": "after-form.entered",
+              "do": "cancel_job"
+            }
+          ]
+        }
+      },
+      "mocks": {
+        "ops": [
+          {
+            "match": {
+              "node_path": "cortex-assistant-session/capture/sequence/capture"
+            },
+            "behavior": {
+              "mode": "passthrough"
+            },
+            "repeat": true
+          },
+          {
+            "match": {
+              "node_path": "cortex-assistant-session/infer/sequence/assemble"
+            },
+            "behavior": {
+              "mode": "passthrough"
+            },
+            "repeat": true
+          },
+          {
+            "match": {
+              "node_path": "cortex-assistant-session/infer/sequence/response"
+            },
+            "behavior": {
+              "mode": "passthrough"
+            },
+            "repeat": true
+          },
+          {
+            "match": {
+              "node_path": "cortex-assistant-session/prompt/sequence/form"
+            },
+            "behavior": {
+              "mode": "passthrough"
+            },
+            "repeat": true
+          },
+          {
+            "match": {
+              "node_path": "cortex-assistant-session/infer/sequence/infer/cortex-assistant-inference/policy"
+            },
+            "behavior": {
+              "mode": "passthrough"
+            },
+            "repeat": true
+          },
+          {
+            "match": {
+              "selector": "nix:github:colony-2/c2ops/6396e1fe6462084e85ea44d86d372bdf3b133db0#pydantic",
+              "node_path": "cortex-assistant-session/infer/sequence/infer/cortex-assistant-inference/infer"
+            },
+            "behavior": {
+              "mode": "return",
+              "outputs": {
+                "response": "{broken",
+                "model": "fixture",
+                "usage": {}
+              }
+            }
+          }
+        ]
+      },
+      "assertions": [
+        {
+          "type": "op_call_count",
+          "node_path": "cortex-assistant-session/infer/sequence/infer/cortex-assistant-inference/infer",
+          "value": 1
+        },
+        {
+          "type": "cel_true",
+          "expr": "controls.complete && controls.final.status == \"CANCELLED\""
+        },
+        {
+          "type": "cel_true",
+          "expr": "calls.exists(c, c.node_path == \"cortex-assistant-session/prompt/sequence/form\" && c.outputs.form.response_schema != null)"
+        },
+        {
+          "type": "cel_true",
+          "expr": "calls.exists(c, c.node_path == \"cortex-assistant-session/infer/sequence/response\" && c.outputs.response.error == \"The model response could not be validated.\")"
+        }
+      ]
+    },
+    {
+      "id": "goal-executable",
+      "type": "integration_case",
+      "inputs": {
+        "protocol": "cortex-assistant/4",
+        "session_id": "native",
+        "prompt": "open",
+        "snapshot": {
+          "tenant_id": "0",
+          "source": {
+            "kind": "global"
+          },
+          "at": "2026-11-11T00:00:00Z",
+          "documents": []
+        },
+        "base_url": {
+          "$c2j_ref": {
+            "kind": "config",
+            "name": "codex_api_base_url",
+            "type": "string"
+          }
+        },
+        "model": {
+          "$c2j_ref": {
+            "kind": "config",
+            "name": "codex_model",
+            "type": "string"
+          }
+        },
+        "provider": "openai",
+        "api_key": {
+          "$c2j_secret": "codex_api_key"
+        }
+      },
+      "runtime": {
+        "backend": "sqlite",
+        "cells": {
+          "root": {
+            "file_sources": {
+              "assistant/lineage.go": "../assistant/lineage.go",
+              "assistant/replay.go": "../assistant/replay.go",
+              "assistant/ordinary_client.go": "../assistant/ordinary_client.go",
+              "assistant/goal_records.go": "../assistant/goal_records.go",
+              "assistant/goal_unstarted.go": "../assistant/goal_unstarted.go",
+              "assistant/ordinary.go": "../assistant/ordinary.go",
+              "assistant/ordinary_attachments.go": "../assistant/ordinary_attachments.go",
+              "assistant/registration.go": "../assistant/registration.go",
+              "assistant/dispatch_discovery.go": "../assistant/dispatch_discovery.go",
+              "assistant/discovery.go": "../assistant/discovery.go",
+              "assistant/activity.go": "../assistant/activity.go",
+              "assistant/validate.go": "../assistant/validate.go",
+              "assistant/contextual_bindings.go": "../assistant/contextual_bindings.go",
+              "assistant/ordinary_dispatch.go": "../assistant/ordinary_dispatch.go",
+              "assistant/tasks.go": "../assistant/tasks.go",
+              "assistant/uploads.go": "../assistant/uploads.go",
+              "assistant/goal_lifecycle.go": "../assistant/goal_lifecycle.go",
+              "assistant/client.go": "../assistant/client.go",
+              "assistant/types.go": "../assistant/types.go",
+              "assistant/snapshot.go": "../assistant/snapshot.go",
+              "assistant/releases.go": "../assistant/releases.go",
+              "assistant/frozen_start.go": "../assistant/frozen_start.go",
+              "go.mod": "../go.mod",
+              "go.sum": "../go.sum",
+              "cmd/bindings-op/main.go": "../cmd/bindings-op/main.go",
+              "cmd/discussion-op/main.go": "../cmd/discussion-op/main.go",
+              "ops/bindings/op.yaml": "../ops/bindings/op.yaml",
+              "ops/discussion/op.yaml": "../ops/discussion/op.yaml"
+            }
+          }
+        },
+        "config": {
+          "codex_api_base_url": "https://native.invalid/exact/root",
+          "codex_model": "native-model"
+        },
+        "secrets": {
+          "codex_api_key": "synthetic-native-only"
+        },
+        "responses": [
+          {
+            "node_path": "cortex-assistant-session/prompt/sequence/await-human",
+            "response": {
+              "command": "finish"
+            }
+          }
+        ],
+        "controls": {
+          "barriers": [
+            {
+              "id": "after-form",
+              "match": {
+                "selector": "./ops/discussion",
+                "node_path": "cortex-assistant-session/prompt/sequence/accept",
+                "cell": "root",
+                "occurrence": 1,
+                "attempt": 1
+              }
+            }
+          ],
+          "actions": [
+            {
+              "on": "after-form.entered",
+              "do": "cancel_job"
+            }
+          ]
+        }
+      },
+      "mocks": {
+        "ops": [
+          {
+            "match": {
+              "node_path": "cortex-assistant-session/capture/sequence/capture"
+            },
+            "behavior": {
+              "mode": "passthrough"
+            },
+            "repeat": true
+          },
+          {
+            "match": {
+              "node_path": "cortex-assistant-session/infer/sequence/assemble"
+            },
+            "behavior": {
+              "mode": "passthrough"
+            },
+            "repeat": true
+          },
+          {
+            "match": {
+              "node_path": "cortex-assistant-session/infer/sequence/response"
+            },
+            "behavior": {
+              "mode": "passthrough"
+            },
+            "repeat": true
+          },
+          {
+            "match": {
+              "node_path": "cortex-assistant-session/prompt/sequence/form"
+            },
+            "behavior": {
+              "mode": "passthrough"
+            },
+            "repeat": true
+          },
+          {
+            "match": {
+              "node_path": "cortex-assistant-session/infer/sequence/infer/cortex-assistant-inference/policy"
+            },
+            "behavior": {
+              "mode": "passthrough"
+            },
+            "repeat": true
+          },
+          {
+            "match": {
+              "selector": "nix:github:colony-2/c2ops/6396e1fe6462084e85ea44d86d372bdf3b133db0#pydantic",
+              "node_path": "cortex-assistant-session/infer/sequence/infer/cortex-assistant-inference/infer"
+            },
+            "behavior": {
+              "mode": "return",
+              "outputs": {
+                "response": "{\"text\": \"native valid reply\", \"documents\": [], \"return_artifact_ids\": [], \"citations\": [], \"tools\": [\"shell\"]}",
+                "model": "fixture",
+                "usage": {}
+              }
+            }
+          }
+        ]
+      },
+      "assertions": [
+        {
+          "type": "op_call_count",
+          "node_path": "cortex-assistant-session/infer/sequence/infer/cortex-assistant-inference/infer",
+          "value": 1
+        },
+        {
+          "type": "cel_true",
+          "expr": "controls.complete && controls.final.status == \"CANCELLED\""
+        },
+        {
+          "type": "cel_true",
+          "expr": "calls.exists(c, c.node_path == \"cortex-assistant-session/prompt/sequence/form\" && c.outputs.form.response_schema != null)"
+        },
+        {
+          "type": "cel_true",
+          "expr": "calls.exists(c, c.node_path == \"cortex-assistant-session/infer/sequence/response\" && c.outputs.response.error == \"The model response could not be validated.\")"
+        }
+      ]
+    },
+    {
+      "id": "goal-citation",
+      "type": "integration_case",
+      "inputs": {
+        "protocol": "cortex-assistant/4",
+        "session_id": "native",
+        "prompt": "open",
+        "snapshot": {
+          "tenant_id": "0",
+          "source": {
+            "kind": "global"
+          },
+          "at": "2026-11-11T00:00:00Z",
+          "documents": []
+        },
+        "base_url": {
+          "$c2j_ref": {
+            "kind": "config",
+            "name": "codex_api_base_url",
+            "type": "string"
+          }
+        },
+        "model": {
+          "$c2j_ref": {
+            "kind": "config",
+            "name": "codex_model",
+            "type": "string"
+          }
+        },
+        "provider": "openai",
+        "api_key": {
+          "$c2j_secret": "codex_api_key"
+        }
+      },
+      "runtime": {
+        "backend": "sqlite",
+        "cells": {
+          "root": {
+            "file_sources": {
+              "assistant/lineage.go": "../assistant/lineage.go",
+              "assistant/replay.go": "../assistant/replay.go",
+              "assistant/ordinary_client.go": "../assistant/ordinary_client.go",
+              "assistant/goal_records.go": "../assistant/goal_records.go",
+              "assistant/goal_unstarted.go": "../assistant/goal_unstarted.go",
+              "assistant/ordinary.go": "../assistant/ordinary.go",
+              "assistant/ordinary_attachments.go": "../assistant/ordinary_attachments.go",
+              "assistant/registration.go": "../assistant/registration.go",
+              "assistant/dispatch_discovery.go": "../assistant/dispatch_discovery.go",
+              "assistant/discovery.go": "../assistant/discovery.go",
+              "assistant/activity.go": "../assistant/activity.go",
+              "assistant/validate.go": "../assistant/validate.go",
+              "assistant/contextual_bindings.go": "../assistant/contextual_bindings.go",
+              "assistant/ordinary_dispatch.go": "../assistant/ordinary_dispatch.go",
+              "assistant/tasks.go": "../assistant/tasks.go",
+              "assistant/uploads.go": "../assistant/uploads.go",
+              "assistant/goal_lifecycle.go": "../assistant/goal_lifecycle.go",
+              "assistant/client.go": "../assistant/client.go",
+              "assistant/types.go": "../assistant/types.go",
+              "assistant/snapshot.go": "../assistant/snapshot.go",
+              "assistant/releases.go": "../assistant/releases.go",
+              "assistant/frozen_start.go": "../assistant/frozen_start.go",
+              "go.mod": "../go.mod",
+              "go.sum": "../go.sum",
+              "cmd/bindings-op/main.go": "../cmd/bindings-op/main.go",
+              "cmd/discussion-op/main.go": "../cmd/discussion-op/main.go",
+              "ops/bindings/op.yaml": "../ops/bindings/op.yaml",
+              "ops/discussion/op.yaml": "../ops/discussion/op.yaml"
+            }
+          }
+        },
+        "config": {
+          "codex_api_base_url": "https://native.invalid/exact/root",
+          "codex_model": "native-model"
+        },
+        "secrets": {
+          "codex_api_key": "synthetic-native-only"
+        },
+        "responses": [
+          {
+            "node_path": "cortex-assistant-session/prompt/sequence/await-human",
+            "response": {
+              "command": "finish"
+            }
+          }
+        ],
+        "controls": {
+          "barriers": [
+            {
+              "id": "after-form",
+              "match": {
+                "selector": "./ops/discussion",
+                "node_path": "cortex-assistant-session/prompt/sequence/accept",
+                "cell": "root",
+                "occurrence": 1,
+                "attempt": 1
+              }
+            }
+          ],
+          "actions": [
+            {
+              "on": "after-form.entered",
+              "do": "cancel_job"
+            }
+          ]
+        }
+      },
+      "mocks": {
+        "ops": [
+          {
+            "match": {
+              "node_path": "cortex-assistant-session/capture/sequence/capture"
+            },
+            "behavior": {
+              "mode": "passthrough"
+            },
+            "repeat": true
+          },
+          {
+            "match": {
+              "node_path": "cortex-assistant-session/infer/sequence/assemble"
+            },
+            "behavior": {
+              "mode": "passthrough"
+            },
+            "repeat": true
+          },
+          {
+            "match": {
+              "node_path": "cortex-assistant-session/infer/sequence/response"
+            },
+            "behavior": {
+              "mode": "passthrough"
+            },
+            "repeat": true
+          },
+          {
+            "match": {
+              "node_path": "cortex-assistant-session/prompt/sequence/form"
+            },
+            "behavior": {
+              "mode": "passthrough"
+            },
+            "repeat": true
+          },
+          {
+            "match": {
+              "node_path": "cortex-assistant-session/infer/sequence/infer/cortex-assistant-inference/policy"
+            },
+            "behavior": {
+              "mode": "passthrough"
+            },
+            "repeat": true
+          },
+          {
+            "match": {
+              "selector": "nix:github:colony-2/c2ops/6396e1fe6462084e85ea44d86d372bdf3b133db0#pydantic",
+              "node_path": "cortex-assistant-session/infer/sequence/infer/cortex-assistant-inference/infer"
+            },
+            "behavior": {
+              "mode": "return",
+              "outputs": {
+                "response": "{\"text\": \"native valid reply\", \"documents\": [], \"return_artifact_ids\": [], \"citations\": [\"forged-source\"]}",
+                "model": "fixture",
+                "usage": {}
+              }
+            }
+          }
+        ]
+      },
+      "assertions": [
+        {
+          "type": "op_call_count",
+          "node_path": "cortex-assistant-session/infer/sequence/infer/cortex-assistant-inference/infer",
+          "value": 1
+        },
+        {
+          "type": "cel_true",
+          "expr": "controls.complete && controls.final.status == \"CANCELLED\""
+        },
+        {
+          "type": "cel_true",
+          "expr": "calls.exists(c, c.node_path == \"cortex-assistant-session/prompt/sequence/form\" && c.outputs.form.response_schema != null)"
+        },
+        {
+          "type": "cel_true",
+          "expr": "calls.exists(c, c.node_path == \"cortex-assistant-session/infer/sequence/response\" && c.outputs.response.error == \"The model response could not be validated.\")"
+        }
+      ]
+    },
+    {
+      "id": "goal-reject-test-actor",
+      "type": "integration_case",
+      "inputs": {
+        "protocol": "cortex-assistant/4",
+        "session_id": "native",
+        "prompt": "open",
+        "snapshot": {
+          "tenant_id": "0",
+          "source": {
+            "kind": "global"
+          },
+          "at": "2026-11-11T00:00:00Z",
+          "documents": []
+        },
+        "base_url": {
+          "$c2j_ref": {
+            "kind": "config",
+            "name": "codex_api_base_url",
+            "type": "string"
+          }
+        },
+        "model": {
+          "$c2j_ref": {
+            "kind": "config",
+            "name": "codex_model",
+            "type": "string"
+          }
+        },
+        "provider": "openai",
+        "api_key": {
+          "$c2j_secret": "codex_api_key"
+        }
+      },
+      "runtime": {
+        "backend": "sqlite",
+        "cells": {
+          "root": {
+            "file_sources": {
+              "assistant/lineage.go": "../assistant/lineage.go",
+              "assistant/replay.go": "../assistant/replay.go",
+              "assistant/ordinary_client.go": "../assistant/ordinary_client.go",
+              "assistant/goal_records.go": "../assistant/goal_records.go",
+              "assistant/goal_unstarted.go": "../assistant/goal_unstarted.go",
+              "assistant/ordinary.go": "../assistant/ordinary.go",
+              "assistant/ordinary_attachments.go": "../assistant/ordinary_attachments.go",
+              "assistant/registration.go": "../assistant/registration.go",
+              "assistant/dispatch_discovery.go": "../assistant/dispatch_discovery.go",
+              "assistant/discovery.go": "../assistant/discovery.go",
+              "assistant/activity.go": "../assistant/activity.go",
+              "assistant/validate.go": "../assistant/validate.go",
+              "assistant/contextual_bindings.go": "../assistant/contextual_bindings.go",
+              "assistant/ordinary_dispatch.go": "../assistant/ordinary_dispatch.go",
+              "assistant/tasks.go": "../assistant/tasks.go",
+              "assistant/uploads.go": "../assistant/uploads.go",
+              "assistant/goal_lifecycle.go": "../assistant/goal_lifecycle.go",
+              "assistant/client.go": "../assistant/client.go",
+              "assistant/types.go": "../assistant/types.go",
+              "assistant/snapshot.go": "../assistant/snapshot.go",
+              "assistant/releases.go": "../assistant/releases.go",
+              "assistant/frozen_start.go": "../assistant/frozen_start.go",
+              "go.mod": "../go.mod",
+              "go.sum": "../go.sum",
+              "cmd/bindings-op/main.go": "../cmd/bindings-op/main.go",
+              "cmd/discussion-op/main.go": "../cmd/discussion-op/main.go",
+              "ops/bindings/op.yaml": "../ops/bindings/op.yaml",
+              "ops/discussion/op.yaml": "../ops/discussion/op.yaml"
+            }
+          }
+        },
+        "config": {
+          "codex_api_base_url": "https://native.invalid/exact/root",
+          "codex_model": "native-model"
+        },
+        "secrets": {
+          "codex_api_key": "synthetic-native-only"
+        },
+        "responses": [
+          {
+            "node_path": "cortex-assistant-session/prompt/sequence/await-human",
+            "response": {
+              "command": "finish"
+            }
+          }
+        ]
+      },
+      "mocks": {
+        "ops": [
+          {
+            "match": {
+              "node_path": "cortex-assistant-session/capture/sequence/capture"
+            },
+            "behavior": {
+              "mode": "passthrough"
+            },
+            "repeat": true
+          },
+          {
+            "match": {
+              "node_path": "cortex-assistant-session/infer/sequence/assemble"
+            },
+            "behavior": {
+              "mode": "passthrough"
+            },
+            "repeat": true
+          },
+          {
+            "match": {
+              "node_path": "cortex-assistant-session/infer/sequence/response"
+            },
+            "behavior": {
+              "mode": "passthrough"
+            },
+            "repeat": true
+          },
+          {
+            "match": {
+              "node_path": "cortex-assistant-session/prompt/sequence/form"
+            },
+            "behavior": {
+              "mode": "passthrough"
+            },
+            "repeat": true
+          },
+          {
+            "match": {
+              "node_path": "cortex-assistant-session/infer/sequence/infer/cortex-assistant-inference/policy"
+            },
+            "behavior": {
+              "mode": "passthrough"
+            },
+            "repeat": true
+          },
+          {
+            "match": {
+              "selector": "nix:github:colony-2/c2ops/6396e1fe6462084e85ea44d86d372bdf3b133db0#pydantic",
+              "node_path": "cortex-assistant-session/infer/sequence/infer/cortex-assistant-inference/infer"
+            },
+            "behavior": {
+              "mode": "return",
+              "outputs": {
+                "response": "{\"text\": \"native valid reply\", \"documents\": [], \"return_artifact_ids\": [], \"citations\": []}",
+                "model": "fixture",
+                "usage": {}
+              }
+            }
+          },
+          {
+            "match": {
+              "node_path": "cortex-assistant-session/prompt/sequence/accept"
+            },
+            "behavior": {
+              "mode": "passthrough"
+            }
+          }
+        ]
+      },
+      "assertions": [
+        {
+          "type": "op_call_count",
+          "node_path": "cortex-assistant-session/infer/sequence/infer/cortex-assistant-inference/infer",
+          "value": 1
+        }
+      ],
+      "expect_error": "stderr: assistant: discussion step unavailable"
+    },
+    {
+      "id": "goal-codex_api_base_url-missing",
+      "type": "integration_case",
+      "inputs": {
+        "protocol": "cortex-assistant/4",
+        "session_id": "native",
+        "prompt": "open",
+        "snapshot": {
+          "tenant_id": "0",
+          "source": {
+            "kind": "global"
+          },
+          "at": "2026-11-11T00:00:00Z",
+          "documents": []
+        },
+        "base_url": {
+          "$c2j_ref": {
+            "kind": "config",
+            "name": "codex_api_base_url",
+            "type": "string"
+          }
+        },
+        "model": {
+          "$c2j_ref": {
+            "kind": "config",
+            "name": "codex_model",
+            "type": "string"
+          }
+        },
+        "provider": "openai",
+        "api_key": {
+          "$c2j_secret": "codex_api_key"
+        }
+      },
+      "runtime": {
+        "backend": "sqlite",
+        "cells": {
+          "root": {
+            "file_sources": {
+              "assistant/lineage.go": "../assistant/lineage.go",
+              "assistant/replay.go": "../assistant/replay.go",
+              "assistant/ordinary_client.go": "../assistant/ordinary_client.go",
+              "assistant/goal_records.go": "../assistant/goal_records.go",
+              "assistant/goal_unstarted.go": "../assistant/goal_unstarted.go",
+              "assistant/ordinary.go": "../assistant/ordinary.go",
+              "assistant/ordinary_attachments.go": "../assistant/ordinary_attachments.go",
+              "assistant/registration.go": "../assistant/registration.go",
+              "assistant/dispatch_discovery.go": "../assistant/dispatch_discovery.go",
+              "assistant/discovery.go": "../assistant/discovery.go",
+              "assistant/activity.go": "../assistant/activity.go",
+              "assistant/validate.go": "../assistant/validate.go",
+              "assistant/contextual_bindings.go": "../assistant/contextual_bindings.go",
+              "assistant/ordinary_dispatch.go": "../assistant/ordinary_dispatch.go",
+              "assistant/tasks.go": "../assistant/tasks.go",
+              "assistant/uploads.go": "../assistant/uploads.go",
+              "assistant/goal_lifecycle.go": "../assistant/goal_lifecycle.go",
+              "assistant/client.go": "../assistant/client.go",
+              "assistant/types.go": "../assistant/types.go",
+              "assistant/snapshot.go": "../assistant/snapshot.go",
+              "assistant/releases.go": "../assistant/releases.go",
+              "assistant/frozen_start.go": "../assistant/frozen_start.go",
+              "go.mod": "../go.mod",
+              "go.sum": "../go.sum",
+              "cmd/bindings-op/main.go": "../cmd/bindings-op/main.go",
+              "cmd/discussion-op/main.go": "../cmd/discussion-op/main.go",
+              "ops/bindings/op.yaml": "../ops/bindings/op.yaml",
+              "ops/discussion/op.yaml": "../ops/discussion/op.yaml"
+            }
+          }
+        },
+        "config": {
+          "codex_model": "native-model"
+        },
+        "secrets": {
+          "codex_api_key": "synthetic-native-only"
+        },
+        "responses": [
+          {
+            "node_path": "cortex-assistant-session/prompt/sequence/await-human",
+            "response": {
+              "command": "finish"
+            }
+          }
+        ],
+        "controls": {
+          "barriers": [
+            {
+              "id": "after-form",
+              "match": {
+                "selector": "./ops/discussion",
+                "node_path": "cortex-assistant-session/prompt/sequence/accept",
+                "cell": "root",
+                "occurrence": 1,
+                "attempt": 1
+              }
+            }
+          ],
+          "actions": [
+            {
+              "on": "after-form.entered",
+              "do": "cancel_job"
+            }
+          ]
+        }
+      },
+      "mocks": {
+        "ops": [
+          {
+            "match": {
+              "node_path": "cortex-assistant-session/capture/sequence/capture"
+            },
+            "behavior": {
+              "mode": "passthrough"
+            },
+            "repeat": true
+          },
+          {
+            "match": {
+              "node_path": "cortex-assistant-session/infer/sequence/assemble"
+            },
+            "behavior": {
+              "mode": "passthrough"
+            },
+            "repeat": true
+          },
+          {
+            "match": {
+              "node_path": "cortex-assistant-session/infer/sequence/response"
+            },
+            "behavior": {
+              "mode": "passthrough"
+            },
+            "repeat": true
+          },
+          {
+            "match": {
+              "node_path": "cortex-assistant-session/prompt/sequence/form"
+            },
+            "behavior": {
+              "mode": "passthrough"
+            },
+            "repeat": true
+          }
+        ]
+      },
+      "assertions": [
+        {
+          "type": "op_call_count",
+          "node_path": "cortex-assistant-session/infer/sequence/infer/cortex-assistant-inference/infer",
+          "value": 0
+        },
+        {
+          "type": "cel_true",
+          "expr": "calls.exists(c, c.node_path == \"cortex-assistant-session/prompt/sequence/form\" && c.outputs.form.request.assistant.error == \"The model response could not be validated.\")"
+        },
+        {
+          "type": "cel_true",
+          "expr": "controls.complete && controls.final.status == \"CANCELLED\""
+        }
+      ]
+    },
+    {
+      "id": "goal-codex_api_base_url-null",
+      "type": "integration_case",
+      "inputs": {
+        "protocol": "cortex-assistant/4",
+        "session_id": "native",
+        "prompt": "open",
+        "snapshot": {
+          "tenant_id": "0",
+          "source": {
+            "kind": "global"
+          },
+          "at": "2026-11-11T00:00:00Z",
+          "documents": []
+        },
+        "base_url": {
+          "$c2j_ref": {
+            "kind": "config",
+            "name": "codex_api_base_url",
+            "type": "string"
+          }
+        },
+        "model": {
+          "$c2j_ref": {
+            "kind": "config",
+            "name": "codex_model",
+            "type": "string"
+          }
+        },
+        "provider": "openai",
+        "api_key": {
+          "$c2j_secret": "codex_api_key"
+        }
+      },
+      "runtime": {
+        "backend": "sqlite",
+        "cells": {
+          "root": {
+            "file_sources": {
+              "assistant/lineage.go": "../assistant/lineage.go",
+              "assistant/replay.go": "../assistant/replay.go",
+              "assistant/ordinary_client.go": "../assistant/ordinary_client.go",
+              "assistant/goal_records.go": "../assistant/goal_records.go",
+              "assistant/goal_unstarted.go": "../assistant/goal_unstarted.go",
+              "assistant/ordinary.go": "../assistant/ordinary.go",
+              "assistant/ordinary_attachments.go": "../assistant/ordinary_attachments.go",
+              "assistant/registration.go": "../assistant/registration.go",
+              "assistant/dispatch_discovery.go": "../assistant/dispatch_discovery.go",
+              "assistant/discovery.go": "../assistant/discovery.go",
+              "assistant/activity.go": "../assistant/activity.go",
+              "assistant/validate.go": "../assistant/validate.go",
+              "assistant/contextual_bindings.go": "../assistant/contextual_bindings.go",
+              "assistant/ordinary_dispatch.go": "../assistant/ordinary_dispatch.go",
+              "assistant/tasks.go": "../assistant/tasks.go",
+              "assistant/uploads.go": "../assistant/uploads.go",
+              "assistant/goal_lifecycle.go": "../assistant/goal_lifecycle.go",
+              "assistant/client.go": "../assistant/client.go",
+              "assistant/types.go": "../assistant/types.go",
+              "assistant/snapshot.go": "../assistant/snapshot.go",
+              "assistant/releases.go": "../assistant/releases.go",
+              "assistant/frozen_start.go": "../assistant/frozen_start.go",
+              "go.mod": "../go.mod",
+              "go.sum": "../go.sum",
+              "cmd/bindings-op/main.go": "../cmd/bindings-op/main.go",
+              "cmd/discussion-op/main.go": "../cmd/discussion-op/main.go",
+              "ops/bindings/op.yaml": "../ops/bindings/op.yaml",
+              "ops/discussion/op.yaml": "../ops/discussion/op.yaml"
+            }
+          }
+        },
+        "config": {
+          "codex_api_base_url": null,
+          "codex_model": "native-model"
+        },
+        "secrets": {
+          "codex_api_key": "synthetic-native-only"
+        },
+        "responses": [
+          {
+            "node_path": "cortex-assistant-session/prompt/sequence/await-human",
+            "response": {
+              "command": "finish"
+            }
+          }
+        ],
+        "controls": {
+          "barriers": [
+            {
+              "id": "after-form",
+              "match": {
+                "selector": "./ops/discussion",
+                "node_path": "cortex-assistant-session/prompt/sequence/accept",
+                "cell": "root",
+                "occurrence": 1,
+                "attempt": 1
+              }
+            }
+          ],
+          "actions": [
+            {
+              "on": "after-form.entered",
+              "do": "cancel_job"
+            }
+          ]
+        }
+      },
+      "mocks": {
+        "ops": [
+          {
+            "match": {
+              "node_path": "cortex-assistant-session/capture/sequence/capture"
+            },
+            "behavior": {
+              "mode": "passthrough"
+            },
+            "repeat": true
+          },
+          {
+            "match": {
+              "node_path": "cortex-assistant-session/infer/sequence/assemble"
+            },
+            "behavior": {
+              "mode": "passthrough"
+            },
+            "repeat": true
+          },
+          {
+            "match": {
+              "node_path": "cortex-assistant-session/infer/sequence/response"
+            },
+            "behavior": {
+              "mode": "passthrough"
+            },
+            "repeat": true
+          },
+          {
+            "match": {
+              "node_path": "cortex-assistant-session/prompt/sequence/form"
+            },
+            "behavior": {
+              "mode": "passthrough"
+            },
+            "repeat": true
+          }
+        ]
+      },
+      "assertions": [
+        {
+          "type": "op_call_count",
+          "node_path": "cortex-assistant-session/infer/sequence/infer/cortex-assistant-inference/infer",
+          "value": 0
+        },
+        {
+          "type": "cel_true",
+          "expr": "calls.exists(c, c.node_path == \"cortex-assistant-session/prompt/sequence/form\" && c.outputs.form.request.assistant.error == \"The model response could not be validated.\")"
+        },
+        {
+          "type": "cel_true",
+          "expr": "controls.complete && controls.final.status == \"CANCELLED\""
+        }
+      ]
+    },
+    {
+      "id": "goal-codex_api_base_url-empty",
+      "type": "integration_case",
+      "inputs": {
+        "protocol": "cortex-assistant/4",
+        "session_id": "native",
+        "prompt": "open",
+        "snapshot": {
+          "tenant_id": "0",
+          "source": {
+            "kind": "global"
+          },
+          "at": "2026-11-11T00:00:00Z",
+          "documents": []
+        },
+        "base_url": {
+          "$c2j_ref": {
+            "kind": "config",
+            "name": "codex_api_base_url",
+            "type": "string"
+          }
+        },
+        "model": {
+          "$c2j_ref": {
+            "kind": "config",
+            "name": "codex_model",
+            "type": "string"
+          }
+        },
+        "provider": "openai",
+        "api_key": {
+          "$c2j_secret": "codex_api_key"
+        }
+      },
+      "runtime": {
+        "backend": "sqlite",
+        "cells": {
+          "root": {
+            "file_sources": {
+              "assistant/lineage.go": "../assistant/lineage.go",
+              "assistant/replay.go": "../assistant/replay.go",
+              "assistant/ordinary_client.go": "../assistant/ordinary_client.go",
+              "assistant/goal_records.go": "../assistant/goal_records.go",
+              "assistant/goal_unstarted.go": "../assistant/goal_unstarted.go",
+              "assistant/ordinary.go": "../assistant/ordinary.go",
+              "assistant/ordinary_attachments.go": "../assistant/ordinary_attachments.go",
+              "assistant/registration.go": "../assistant/registration.go",
+              "assistant/dispatch_discovery.go": "../assistant/dispatch_discovery.go",
+              "assistant/discovery.go": "../assistant/discovery.go",
+              "assistant/activity.go": "../assistant/activity.go",
+              "assistant/validate.go": "../assistant/validate.go",
+              "assistant/contextual_bindings.go": "../assistant/contextual_bindings.go",
+              "assistant/ordinary_dispatch.go": "../assistant/ordinary_dispatch.go",
+              "assistant/tasks.go": "../assistant/tasks.go",
+              "assistant/uploads.go": "../assistant/uploads.go",
+              "assistant/goal_lifecycle.go": "../assistant/goal_lifecycle.go",
+              "assistant/client.go": "../assistant/client.go",
+              "assistant/types.go": "../assistant/types.go",
+              "assistant/snapshot.go": "../assistant/snapshot.go",
+              "assistant/releases.go": "../assistant/releases.go",
+              "assistant/frozen_start.go": "../assistant/frozen_start.go",
+              "go.mod": "../go.mod",
+              "go.sum": "../go.sum",
+              "cmd/bindings-op/main.go": "../cmd/bindings-op/main.go",
+              "cmd/discussion-op/main.go": "../cmd/discussion-op/main.go",
+              "ops/bindings/op.yaml": "../ops/bindings/op.yaml",
+              "ops/discussion/op.yaml": "../ops/discussion/op.yaml"
+            }
+          }
+        },
+        "config": {
+          "codex_api_base_url": "",
+          "codex_model": "native-model"
+        },
+        "secrets": {
+          "codex_api_key": "synthetic-native-only"
+        },
+        "responses": [
+          {
+            "node_path": "cortex-assistant-session/prompt/sequence/await-human",
+            "response": {
+              "command": "finish"
+            }
+          }
+        ],
+        "controls": {
+          "barriers": [
+            {
+              "id": "after-form",
+              "match": {
+                "selector": "./ops/discussion",
+                "node_path": "cortex-assistant-session/prompt/sequence/accept",
+                "cell": "root",
+                "occurrence": 1,
+                "attempt": 1
+              }
+            }
+          ],
+          "actions": [
+            {
+              "on": "after-form.entered",
+              "do": "cancel_job"
+            }
+          ]
+        }
+      },
+      "mocks": {
+        "ops": [
+          {
+            "match": {
+              "node_path": "cortex-assistant-session/capture/sequence/capture"
+            },
+            "behavior": {
+              "mode": "passthrough"
+            },
+            "repeat": true
+          },
+          {
+            "match": {
+              "node_path": "cortex-assistant-session/infer/sequence/assemble"
+            },
+            "behavior": {
+              "mode": "passthrough"
+            },
+            "repeat": true
+          },
+          {
+            "match": {
+              "node_path": "cortex-assistant-session/infer/sequence/response"
+            },
+            "behavior": {
+              "mode": "passthrough"
+            },
+            "repeat": true
+          },
+          {
+            "match": {
+              "node_path": "cortex-assistant-session/prompt/sequence/form"
+            },
+            "behavior": {
+              "mode": "passthrough"
+            },
+            "repeat": true
+          },
+          {
+            "match": {
+              "node_path": "cortex-assistant-session/infer/sequence/infer/cortex-assistant-inference/policy"
+            },
+            "behavior": {
+              "mode": "passthrough"
+            },
+            "repeat": true
+          }
+        ]
+      },
+      "assertions": [
+        {
+          "type": "op_call_count",
+          "node_path": "cortex-assistant-session/infer/sequence/infer/cortex-assistant-inference/infer",
+          "value": 0
+        },
+        {
+          "type": "cel_true",
+          "expr": "calls.exists(c, c.node_path == \"cortex-assistant-session/prompt/sequence/form\" && c.outputs.form.request.assistant.error == \"The model response could not be validated.\")"
+        },
+        {
+          "type": "cel_true",
+          "expr": "controls.complete && controls.final.status == \"CANCELLED\""
+        }
+      ]
+    },
+    {
+      "id": "goal-codex_api_base_url-wrong-type",
+      "type": "integration_case",
+      "inputs": {
+        "protocol": "cortex-assistant/4",
+        "session_id": "native",
+        "prompt": "open",
+        "snapshot": {
+          "tenant_id": "0",
+          "source": {
+            "kind": "global"
+          },
+          "at": "2026-11-11T00:00:00Z",
+          "documents": []
+        },
+        "base_url": {
+          "$c2j_ref": {
+            "kind": "config",
+            "name": "codex_api_base_url",
+            "type": "string"
+          }
+        },
+        "model": {
+          "$c2j_ref": {
+            "kind": "config",
+            "name": "codex_model",
+            "type": "string"
+          }
+        },
+        "provider": "openai",
+        "api_key": {
+          "$c2j_secret": "codex_api_key"
+        }
+      },
+      "runtime": {
+        "backend": "sqlite",
+        "cells": {
+          "root": {
+            "file_sources": {
+              "assistant/lineage.go": "../assistant/lineage.go",
+              "assistant/replay.go": "../assistant/replay.go",
+              "assistant/ordinary_client.go": "../assistant/ordinary_client.go",
+              "assistant/goal_records.go": "../assistant/goal_records.go",
+              "assistant/goal_unstarted.go": "../assistant/goal_unstarted.go",
+              "assistant/ordinary.go": "../assistant/ordinary.go",
+              "assistant/ordinary_attachments.go": "../assistant/ordinary_attachments.go",
+              "assistant/registration.go": "../assistant/registration.go",
+              "assistant/dispatch_discovery.go": "../assistant/dispatch_discovery.go",
+              "assistant/discovery.go": "../assistant/discovery.go",
+              "assistant/activity.go": "../assistant/activity.go",
+              "assistant/validate.go": "../assistant/validate.go",
+              "assistant/contextual_bindings.go": "../assistant/contextual_bindings.go",
+              "assistant/ordinary_dispatch.go": "../assistant/ordinary_dispatch.go",
+              "assistant/tasks.go": "../assistant/tasks.go",
+              "assistant/uploads.go": "../assistant/uploads.go",
+              "assistant/goal_lifecycle.go": "../assistant/goal_lifecycle.go",
+              "assistant/client.go": "../assistant/client.go",
+              "assistant/types.go": "../assistant/types.go",
+              "assistant/snapshot.go": "../assistant/snapshot.go",
+              "assistant/releases.go": "../assistant/releases.go",
+              "assistant/frozen_start.go": "../assistant/frozen_start.go",
+              "go.mod": "../go.mod",
+              "go.sum": "../go.sum",
+              "cmd/bindings-op/main.go": "../cmd/bindings-op/main.go",
+              "cmd/discussion-op/main.go": "../cmd/discussion-op/main.go",
+              "ops/bindings/op.yaml": "../ops/bindings/op.yaml",
+              "ops/discussion/op.yaml": "../ops/discussion/op.yaml"
+            }
+          }
+        },
+        "config": {
+          "codex_api_base_url": 7,
+          "codex_model": "native-model"
+        },
+        "secrets": {
+          "codex_api_key": "synthetic-native-only"
+        },
+        "responses": [
+          {
+            "node_path": "cortex-assistant-session/prompt/sequence/await-human",
+            "response": {
+              "command": "finish"
+            }
+          }
+        ],
+        "controls": {
+          "barriers": [
+            {
+              "id": "after-form",
+              "match": {
+                "selector": "./ops/discussion",
+                "node_path": "cortex-assistant-session/prompt/sequence/accept",
+                "cell": "root",
+                "occurrence": 1,
+                "attempt": 1
+              }
+            }
+          ],
+          "actions": [
+            {
+              "on": "after-form.entered",
+              "do": "cancel_job"
+            }
+          ]
+        }
+      },
+      "mocks": {
+        "ops": [
+          {
+            "match": {
+              "node_path": "cortex-assistant-session/capture/sequence/capture"
+            },
+            "behavior": {
+              "mode": "passthrough"
+            },
+            "repeat": true
+          },
+          {
+            "match": {
+              "node_path": "cortex-assistant-session/infer/sequence/assemble"
+            },
+            "behavior": {
+              "mode": "passthrough"
+            },
+            "repeat": true
+          },
+          {
+            "match": {
+              "node_path": "cortex-assistant-session/infer/sequence/response"
+            },
+            "behavior": {
+              "mode": "passthrough"
+            },
+            "repeat": true
+          },
+          {
+            "match": {
+              "node_path": "cortex-assistant-session/prompt/sequence/form"
+            },
+            "behavior": {
+              "mode": "passthrough"
+            },
+            "repeat": true
+          }
+        ]
+      },
+      "assertions": [
+        {
+          "type": "op_call_count",
+          "node_path": "cortex-assistant-session/infer/sequence/infer/cortex-assistant-inference/infer",
+          "value": 0
+        },
+        {
+          "type": "cel_true",
+          "expr": "calls.exists(c, c.node_path == \"cortex-assistant-session/prompt/sequence/form\" && c.outputs.form.request.assistant.error == \"The model response could not be validated.\")"
+        },
+        {
+          "type": "cel_true",
+          "expr": "controls.complete && controls.final.status == \"CANCELLED\""
+        }
+      ]
+    },
+    {
+      "id": "goal-codex_model-missing",
+      "type": "integration_case",
+      "inputs": {
+        "protocol": "cortex-assistant/4",
+        "session_id": "native",
+        "prompt": "open",
+        "snapshot": {
+          "tenant_id": "0",
+          "source": {
+            "kind": "global"
+          },
+          "at": "2026-11-11T00:00:00Z",
+          "documents": []
+        },
+        "base_url": {
+          "$c2j_ref": {
+            "kind": "config",
+            "name": "codex_api_base_url",
+            "type": "string"
+          }
+        },
+        "model": {
+          "$c2j_ref": {
+            "kind": "config",
+            "name": "codex_model",
+            "type": "string"
+          }
+        },
+        "provider": "openai",
+        "api_key": {
+          "$c2j_secret": "codex_api_key"
+        }
+      },
+      "runtime": {
+        "backend": "sqlite",
+        "cells": {
+          "root": {
+            "file_sources": {
+              "assistant/lineage.go": "../assistant/lineage.go",
+              "assistant/replay.go": "../assistant/replay.go",
+              "assistant/ordinary_client.go": "../assistant/ordinary_client.go",
+              "assistant/goal_records.go": "../assistant/goal_records.go",
+              "assistant/goal_unstarted.go": "../assistant/goal_unstarted.go",
+              "assistant/ordinary.go": "../assistant/ordinary.go",
+              "assistant/ordinary_attachments.go": "../assistant/ordinary_attachments.go",
+              "assistant/registration.go": "../assistant/registration.go",
+              "assistant/dispatch_discovery.go": "../assistant/dispatch_discovery.go",
+              "assistant/discovery.go": "../assistant/discovery.go",
+              "assistant/activity.go": "../assistant/activity.go",
+              "assistant/validate.go": "../assistant/validate.go",
+              "assistant/contextual_bindings.go": "../assistant/contextual_bindings.go",
+              "assistant/ordinary_dispatch.go": "../assistant/ordinary_dispatch.go",
+              "assistant/tasks.go": "../assistant/tasks.go",
+              "assistant/uploads.go": "../assistant/uploads.go",
+              "assistant/goal_lifecycle.go": "../assistant/goal_lifecycle.go",
+              "assistant/client.go": "../assistant/client.go",
+              "assistant/types.go": "../assistant/types.go",
+              "assistant/snapshot.go": "../assistant/snapshot.go",
+              "assistant/releases.go": "../assistant/releases.go",
+              "assistant/frozen_start.go": "../assistant/frozen_start.go",
+              "go.mod": "../go.mod",
+              "go.sum": "../go.sum",
+              "cmd/bindings-op/main.go": "../cmd/bindings-op/main.go",
+              "cmd/discussion-op/main.go": "../cmd/discussion-op/main.go",
+              "ops/bindings/op.yaml": "../ops/bindings/op.yaml",
+              "ops/discussion/op.yaml": "../ops/discussion/op.yaml"
+            }
+          }
+        },
+        "config": {
+          "codex_api_base_url": "https://native.invalid/exact/root"
+        },
+        "secrets": {
+          "codex_api_key": "synthetic-native-only"
+        },
+        "responses": [
+          {
+            "node_path": "cortex-assistant-session/prompt/sequence/await-human",
+            "response": {
+              "command": "finish"
+            }
+          }
+        ],
+        "controls": {
+          "barriers": [
+            {
+              "id": "after-form",
+              "match": {
+                "selector": "./ops/discussion",
+                "node_path": "cortex-assistant-session/prompt/sequence/accept",
+                "cell": "root",
+                "occurrence": 1,
+                "attempt": 1
+              }
+            }
+          ],
+          "actions": [
+            {
+              "on": "after-form.entered",
+              "do": "cancel_job"
+            }
+          ]
+        }
+      },
+      "mocks": {
+        "ops": [
+          {
+            "match": {
+              "node_path": "cortex-assistant-session/capture/sequence/capture"
+            },
+            "behavior": {
+              "mode": "passthrough"
+            },
+            "repeat": true
+          },
+          {
+            "match": {
+              "node_path": "cortex-assistant-session/infer/sequence/assemble"
+            },
+            "behavior": {
+              "mode": "passthrough"
+            },
+            "repeat": true
+          },
+          {
+            "match": {
+              "node_path": "cortex-assistant-session/infer/sequence/response"
+            },
+            "behavior": {
+              "mode": "passthrough"
+            },
+            "repeat": true
+          },
+          {
+            "match": {
+              "node_path": "cortex-assistant-session/prompt/sequence/form"
+            },
+            "behavior": {
+              "mode": "passthrough"
+            },
+            "repeat": true
+          }
+        ]
+      },
+      "assertions": [
+        {
+          "type": "op_call_count",
+          "node_path": "cortex-assistant-session/infer/sequence/infer/cortex-assistant-inference/infer",
+          "value": 0
+        },
+        {
+          "type": "cel_true",
+          "expr": "calls.exists(c, c.node_path == \"cortex-assistant-session/prompt/sequence/form\" && c.outputs.form.request.assistant.error == \"The model response could not be validated.\")"
+        },
+        {
+          "type": "cel_true",
+          "expr": "controls.complete && controls.final.status == \"CANCELLED\""
+        }
+      ]
+    },
+    {
+      "id": "goal-codex_model-null",
+      "type": "integration_case",
+      "inputs": {
+        "protocol": "cortex-assistant/4",
+        "session_id": "native",
+        "prompt": "open",
+        "snapshot": {
+          "tenant_id": "0",
+          "source": {
+            "kind": "global"
+          },
+          "at": "2026-11-11T00:00:00Z",
+          "documents": []
+        },
+        "base_url": {
+          "$c2j_ref": {
+            "kind": "config",
+            "name": "codex_api_base_url",
+            "type": "string"
+          }
+        },
+        "model": {
+          "$c2j_ref": {
+            "kind": "config",
+            "name": "codex_model",
+            "type": "string"
+          }
+        },
+        "provider": "openai",
+        "api_key": {
+          "$c2j_secret": "codex_api_key"
+        }
+      },
+      "runtime": {
+        "backend": "sqlite",
+        "cells": {
+          "root": {
+            "file_sources": {
+              "assistant/lineage.go": "../assistant/lineage.go",
+              "assistant/replay.go": "../assistant/replay.go",
+              "assistant/ordinary_client.go": "../assistant/ordinary_client.go",
+              "assistant/goal_records.go": "../assistant/goal_records.go",
+              "assistant/goal_unstarted.go": "../assistant/goal_unstarted.go",
+              "assistant/ordinary.go": "../assistant/ordinary.go",
+              "assistant/ordinary_attachments.go": "../assistant/ordinary_attachments.go",
+              "assistant/registration.go": "../assistant/registration.go",
+              "assistant/dispatch_discovery.go": "../assistant/dispatch_discovery.go",
+              "assistant/discovery.go": "../assistant/discovery.go",
+              "assistant/activity.go": "../assistant/activity.go",
+              "assistant/validate.go": "../assistant/validate.go",
+              "assistant/contextual_bindings.go": "../assistant/contextual_bindings.go",
+              "assistant/ordinary_dispatch.go": "../assistant/ordinary_dispatch.go",
+              "assistant/tasks.go": "../assistant/tasks.go",
+              "assistant/uploads.go": "../assistant/uploads.go",
+              "assistant/goal_lifecycle.go": "../assistant/goal_lifecycle.go",
+              "assistant/client.go": "../assistant/client.go",
+              "assistant/types.go": "../assistant/types.go",
+              "assistant/snapshot.go": "../assistant/snapshot.go",
+              "assistant/releases.go": "../assistant/releases.go",
+              "assistant/frozen_start.go": "../assistant/frozen_start.go",
+              "go.mod": "../go.mod",
+              "go.sum": "../go.sum",
+              "cmd/bindings-op/main.go": "../cmd/bindings-op/main.go",
+              "cmd/discussion-op/main.go": "../cmd/discussion-op/main.go",
+              "ops/bindings/op.yaml": "../ops/bindings/op.yaml",
+              "ops/discussion/op.yaml": "../ops/discussion/op.yaml"
+            }
+          }
+        },
+        "config": {
+          "codex_api_base_url": "https://native.invalid/exact/root",
+          "codex_model": null
+        },
+        "secrets": {
+          "codex_api_key": "synthetic-native-only"
+        },
+        "responses": [
+          {
+            "node_path": "cortex-assistant-session/prompt/sequence/await-human",
+            "response": {
+              "command": "finish"
+            }
+          }
+        ],
+        "controls": {
+          "barriers": [
+            {
+              "id": "after-form",
+              "match": {
+                "selector": "./ops/discussion",
+                "node_path": "cortex-assistant-session/prompt/sequence/accept",
+                "cell": "root",
+                "occurrence": 1,
+                "attempt": 1
+              }
+            }
+          ],
+          "actions": [
+            {
+              "on": "after-form.entered",
+              "do": "cancel_job"
+            }
+          ]
+        }
+      },
+      "mocks": {
+        "ops": [
+          {
+            "match": {
+              "node_path": "cortex-assistant-session/capture/sequence/capture"
+            },
+            "behavior": {
+              "mode": "passthrough"
+            },
+            "repeat": true
+          },
+          {
+            "match": {
+              "node_path": "cortex-assistant-session/infer/sequence/assemble"
+            },
+            "behavior": {
+              "mode": "passthrough"
+            },
+            "repeat": true
+          },
+          {
+            "match": {
+              "node_path": "cortex-assistant-session/infer/sequence/response"
+            },
+            "behavior": {
+              "mode": "passthrough"
+            },
+            "repeat": true
+          },
+          {
+            "match": {
+              "node_path": "cortex-assistant-session/prompt/sequence/form"
+            },
+            "behavior": {
+              "mode": "passthrough"
+            },
+            "repeat": true
+          }
+        ]
+      },
+      "assertions": [
+        {
+          "type": "op_call_count",
+          "node_path": "cortex-assistant-session/infer/sequence/infer/cortex-assistant-inference/infer",
+          "value": 0
+        },
+        {
+          "type": "cel_true",
+          "expr": "calls.exists(c, c.node_path == \"cortex-assistant-session/prompt/sequence/form\" && c.outputs.form.request.assistant.error == \"The model response could not be validated.\")"
+        },
+        {
+          "type": "cel_true",
+          "expr": "controls.complete && controls.final.status == \"CANCELLED\""
+        }
+      ]
+    },
+    {
+      "id": "goal-codex_model-empty",
+      "type": "integration_case",
+      "inputs": {
+        "protocol": "cortex-assistant/4",
+        "session_id": "native",
+        "prompt": "open",
+        "snapshot": {
+          "tenant_id": "0",
+          "source": {
+            "kind": "global"
+          },
+          "at": "2026-11-11T00:00:00Z",
+          "documents": []
+        },
+        "base_url": {
+          "$c2j_ref": {
+            "kind": "config",
+            "name": "codex_api_base_url",
+            "type": "string"
+          }
+        },
+        "model": {
+          "$c2j_ref": {
+            "kind": "config",
+            "name": "codex_model",
+            "type": "string"
+          }
+        },
+        "provider": "openai",
+        "api_key": {
+          "$c2j_secret": "codex_api_key"
+        }
+      },
+      "runtime": {
+        "backend": "sqlite",
+        "cells": {
+          "root": {
+            "file_sources": {
+              "assistant/lineage.go": "../assistant/lineage.go",
+              "assistant/replay.go": "../assistant/replay.go",
+              "assistant/ordinary_client.go": "../assistant/ordinary_client.go",
+              "assistant/goal_records.go": "../assistant/goal_records.go",
+              "assistant/goal_unstarted.go": "../assistant/goal_unstarted.go",
+              "assistant/ordinary.go": "../assistant/ordinary.go",
+              "assistant/ordinary_attachments.go": "../assistant/ordinary_attachments.go",
+              "assistant/registration.go": "../assistant/registration.go",
+              "assistant/dispatch_discovery.go": "../assistant/dispatch_discovery.go",
+              "assistant/discovery.go": "../assistant/discovery.go",
+              "assistant/activity.go": "../assistant/activity.go",
+              "assistant/validate.go": "../assistant/validate.go",
+              "assistant/contextual_bindings.go": "../assistant/contextual_bindings.go",
+              "assistant/ordinary_dispatch.go": "../assistant/ordinary_dispatch.go",
+              "assistant/tasks.go": "../assistant/tasks.go",
+              "assistant/uploads.go": "../assistant/uploads.go",
+              "assistant/goal_lifecycle.go": "../assistant/goal_lifecycle.go",
+              "assistant/client.go": "../assistant/client.go",
+              "assistant/types.go": "../assistant/types.go",
+              "assistant/snapshot.go": "../assistant/snapshot.go",
+              "assistant/releases.go": "../assistant/releases.go",
+              "assistant/frozen_start.go": "../assistant/frozen_start.go",
+              "go.mod": "../go.mod",
+              "go.sum": "../go.sum",
+              "cmd/bindings-op/main.go": "../cmd/bindings-op/main.go",
+              "cmd/discussion-op/main.go": "../cmd/discussion-op/main.go",
+              "ops/bindings/op.yaml": "../ops/bindings/op.yaml",
+              "ops/discussion/op.yaml": "../ops/discussion/op.yaml"
+            }
+          }
+        },
+        "config": {
+          "codex_api_base_url": "https://native.invalid/exact/root",
+          "codex_model": ""
+        },
+        "secrets": {
+          "codex_api_key": "synthetic-native-only"
+        },
+        "responses": [
+          {
+            "node_path": "cortex-assistant-session/prompt/sequence/await-human",
+            "response": {
+              "command": "finish"
+            }
+          }
+        ],
+        "controls": {
+          "barriers": [
+            {
+              "id": "after-form",
+              "match": {
+                "selector": "./ops/discussion",
+                "node_path": "cortex-assistant-session/prompt/sequence/accept",
+                "cell": "root",
+                "occurrence": 1,
+                "attempt": 1
+              }
+            }
+          ],
+          "actions": [
+            {
+              "on": "after-form.entered",
+              "do": "cancel_job"
+            }
+          ]
+        }
+      },
+      "mocks": {
+        "ops": [
+          {
+            "match": {
+              "node_path": "cortex-assistant-session/capture/sequence/capture"
+            },
+            "behavior": {
+              "mode": "passthrough"
+            },
+            "repeat": true
+          },
+          {
+            "match": {
+              "node_path": "cortex-assistant-session/infer/sequence/assemble"
+            },
+            "behavior": {
+              "mode": "passthrough"
+            },
+            "repeat": true
+          },
+          {
+            "match": {
+              "node_path": "cortex-assistant-session/infer/sequence/response"
+            },
+            "behavior": {
+              "mode": "passthrough"
+            },
+            "repeat": true
+          },
+          {
+            "match": {
+              "node_path": "cortex-assistant-session/prompt/sequence/form"
+            },
+            "behavior": {
+              "mode": "passthrough"
+            },
+            "repeat": true
+          },
+          {
+            "match": {
+              "node_path": "cortex-assistant-session/infer/sequence/infer/cortex-assistant-inference/policy"
+            },
+            "behavior": {
+              "mode": "passthrough"
+            },
+            "repeat": true
+          }
+        ]
+      },
+      "assertions": [
+        {
+          "type": "op_call_count",
+          "node_path": "cortex-assistant-session/infer/sequence/infer/cortex-assistant-inference/infer",
+          "value": 0
+        },
+        {
+          "type": "cel_true",
+          "expr": "calls.exists(c, c.node_path == \"cortex-assistant-session/prompt/sequence/form\" && c.outputs.form.request.assistant.error == \"The model response could not be validated.\")"
+        },
+        {
+          "type": "cel_true",
+          "expr": "controls.complete && controls.final.status == \"CANCELLED\""
+        }
+      ]
+    },
+    {
+      "id": "goal-codex_model-wrong-type",
+      "type": "integration_case",
+      "inputs": {
+        "protocol": "cortex-assistant/4",
+        "session_id": "native",
+        "prompt": "open",
+        "snapshot": {
+          "tenant_id": "0",
+          "source": {
+            "kind": "global"
+          },
+          "at": "2026-11-11T00:00:00Z",
+          "documents": []
+        },
+        "base_url": {
+          "$c2j_ref": {
+            "kind": "config",
+            "name": "codex_api_base_url",
+            "type": "string"
+          }
+        },
+        "model": {
+          "$c2j_ref": {
+            "kind": "config",
+            "name": "codex_model",
+            "type": "string"
+          }
+        },
+        "provider": "openai",
+        "api_key": {
+          "$c2j_secret": "codex_api_key"
+        }
+      },
+      "runtime": {
+        "backend": "sqlite",
+        "cells": {
+          "root": {
+            "file_sources": {
+              "assistant/lineage.go": "../assistant/lineage.go",
+              "assistant/replay.go": "../assistant/replay.go",
+              "assistant/ordinary_client.go": "../assistant/ordinary_client.go",
+              "assistant/goal_records.go": "../assistant/goal_records.go",
+              "assistant/goal_unstarted.go": "../assistant/goal_unstarted.go",
+              "assistant/ordinary.go": "../assistant/ordinary.go",
+              "assistant/ordinary_attachments.go": "../assistant/ordinary_attachments.go",
+              "assistant/registration.go": "../assistant/registration.go",
+              "assistant/dispatch_discovery.go": "../assistant/dispatch_discovery.go",
+              "assistant/discovery.go": "../assistant/discovery.go",
+              "assistant/activity.go": "../assistant/activity.go",
+              "assistant/validate.go": "../assistant/validate.go",
+              "assistant/contextual_bindings.go": "../assistant/contextual_bindings.go",
+              "assistant/ordinary_dispatch.go": "../assistant/ordinary_dispatch.go",
+              "assistant/tasks.go": "../assistant/tasks.go",
+              "assistant/uploads.go": "../assistant/uploads.go",
+              "assistant/goal_lifecycle.go": "../assistant/goal_lifecycle.go",
+              "assistant/client.go": "../assistant/client.go",
+              "assistant/types.go": "../assistant/types.go",
+              "assistant/snapshot.go": "../assistant/snapshot.go",
+              "assistant/releases.go": "../assistant/releases.go",
+              "assistant/frozen_start.go": "../assistant/frozen_start.go",
+              "go.mod": "../go.mod",
+              "go.sum": "../go.sum",
+              "cmd/bindings-op/main.go": "../cmd/bindings-op/main.go",
+              "cmd/discussion-op/main.go": "../cmd/discussion-op/main.go",
+              "ops/bindings/op.yaml": "../ops/bindings/op.yaml",
+              "ops/discussion/op.yaml": "../ops/discussion/op.yaml"
+            }
+          }
+        },
+        "config": {
+          "codex_api_base_url": "https://native.invalid/exact/root",
+          "codex_model": 7
+        },
+        "secrets": {
+          "codex_api_key": "synthetic-native-only"
+        },
+        "responses": [
+          {
+            "node_path": "cortex-assistant-session/prompt/sequence/await-human",
+            "response": {
+              "command": "finish"
+            }
+          }
+        ],
+        "controls": {
+          "barriers": [
+            {
+              "id": "after-form",
+              "match": {
+                "selector": "./ops/discussion",
+                "node_path": "cortex-assistant-session/prompt/sequence/accept",
+                "cell": "root",
+                "occurrence": 1,
+                "attempt": 1
+              }
+            }
+          ],
+          "actions": [
+            {
+              "on": "after-form.entered",
+              "do": "cancel_job"
+            }
+          ]
+        }
+      },
+      "mocks": {
+        "ops": [
+          {
+            "match": {
+              "node_path": "cortex-assistant-session/capture/sequence/capture"
+            },
+            "behavior": {
+              "mode": "passthrough"
+            },
+            "repeat": true
+          },
+          {
+            "match": {
+              "node_path": "cortex-assistant-session/infer/sequence/assemble"
+            },
+            "behavior": {
+              "mode": "passthrough"
+            },
+            "repeat": true
+          },
+          {
+            "match": {
+              "node_path": "cortex-assistant-session/infer/sequence/response"
+            },
+            "behavior": {
+              "mode": "passthrough"
+            },
+            "repeat": true
+          },
+          {
+            "match": {
+              "node_path": "cortex-assistant-session/prompt/sequence/form"
+            },
+            "behavior": {
+              "mode": "passthrough"
+            },
+            "repeat": true
+          }
+        ]
+      },
+      "assertions": [
+        {
+          "type": "op_call_count",
+          "node_path": "cortex-assistant-session/infer/sequence/infer/cortex-assistant-inference/infer",
+          "value": 0
+        },
+        {
+          "type": "cel_true",
+          "expr": "calls.exists(c, c.node_path == \"cortex-assistant-session/prompt/sequence/form\" && c.outputs.form.request.assistant.error == \"The model response could not be validated.\")"
+        },
+        {
+          "type": "cel_true",
+          "expr": "controls.complete && controls.final.status == \"CANCELLED\""
+        }
+      ]
+    }
+  ]
+}

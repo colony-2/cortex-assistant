@@ -1,14 +1,21 @@
 package assistant
 
 import (
+	"bytes"
 	"context"
 	"io"
+	"net/http"
+	"net/http/httptest"
 	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/colony-2/c2j/pkg/jobref"
 	"github.com/colony-2/c2j/pkg/secrets"
+	"github.com/colony-2/c2j/pkg/swfutil"
 	"github.com/colony-2/jobdb/pkg/jobdb"
 )
 
@@ -160,6 +167,67 @@ func auditOrdinaryRetention(t *testing.T, ctx context.Context, c *Client, w Call
 			}
 		}
 	}
+	projected, e := swfutil.ExecutionTasks(run)
+	if e != nil {
+		t.Fatal(e)
+	}
+	for _, task := range projected {
+		for _, a := range task.Attempts {
+			inspect(task.InvocationID+"/input", a.Input)
+			inspect(task.InvocationID+"/output", a.Output)
+		}
+	}
+	if len(hits) > 0 {
+		t.Fatalf("synthetic credential retained at %v", hits)
+	}
 	// Audit the story/diagnostic projection as a separate consumer surface.
 	return map[string]any{"inline_history_contains_secret": strings.Contains(string(mustJSON(run)), secret), "private_retention_locations": hits, "io_artifacts_scanned": artifacts, "raw_history_published": false, "authorization_headers_published": false, "scope": "Complete retained run at this boundary, including attempt inputs, outputs and each IO artifact. Independent provider stores, deleted temporary process files and operator logs outside this runtime are not included."}
+}
+
+// This invokes the unchanged adapter itself. A fixture/setup/provider error is
+// not its validation category and cannot satisfy these pre-provider negatives.
+func TestPinnedAdapterRejectsInvalidBindingsBeforeProvider(t *testing.T) {
+	resolve := exec.Command("nix", "--extra-experimental-features", "nix-command flakes", "build", "--no-link", "--no-write-lock-file", "--print-out-paths", strings.TrimPrefix(OrdinaryModelOperation, "nix:"))
+	raw, err := resolve.Output()
+	if err != nil {
+		t.Fatal("resolve pinned adapter", err)
+	}
+	store := strings.TrimSpace(string(raw))
+	verifyInferenceBytes(t, store, map[string]any{})
+	var requests atomic.Int64
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { requests.Add(1); w.WriteHeader(500) }))
+	defer server.Close()
+	for _, name := range []string{"empty-key", "key-whitespace", "invalid-schema", "remote-reference", "timeout", "extra-api-field", "empty-model"} {
+		t.Run(name, func(t *testing.T) {
+			payload := map[string]any{"api": map[string]any{"base_url": server.URL, "api_key": "private-adapter-test-key"}, "default_provider": "openai", "default_model": "fixture", "prompt": "test", "response_schema": map[string]any{"type": "object", "properties": map[string]any{}}, "invocation_timeout": 10}
+			switch name {
+			case "empty-key":
+				payload["api"].(map[string]any)["api_key"] = ""
+			case "key-whitespace":
+				payload["api"].(map[string]any)["api_key"] = "private key"
+			case "invalid-schema":
+				payload["response_schema"] = map[string]any{"type": "string"}
+			case "remote-reference":
+				payload["response_schema"] = map[string]any{"type": "object", "$ref": "https://unselected.invalid/schema"}
+			case "timeout":
+				payload["invocation_timeout"] = 0
+			case "extra-api-field":
+				payload["api"].(map[string]any)["headers"] = map[string]any{}
+			case "empty-model":
+				payload["default_model"] = ""
+			}
+			cmd := exec.Command(filepath.Join(store, "bin/pydantic"))
+			cmd.Stdin = bytes.NewReader(mustJSON(payload))
+			var stderr bytes.Buffer
+			cmd.Stderr = &stderr
+			stdout, e := cmd.Output()
+			exit, ok := e.(*exec.ExitError)
+			if !ok || exit.ExitCode() != 1 || len(stdout) != 0 || strings.TrimSpace(stderr.String()) != "pydantic: validation" {
+				t.Fatalf("wrong adapter failure: %v stdout=%q stderr=%q", e, stdout, stderr.String())
+			}
+		})
+	}
+	if requests.Load() != 0 {
+		t.Fatal("invalid adapter input reached provider")
+	}
 }

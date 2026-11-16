@@ -1,0 +1,22 @@
+name: cortex-assistant-bindings
+version: "1.0.0"
+description: Validate nonsecret inference settings and preserve accepted values
+command: [go, run, ../../cmd/bindings-op]
+dependencies:
+  - nix:github:NixOS/nixpkgs/e7439b6b14ad3cc35d05608ebca9bce01a25f5f8#go
+input_schema:
+  type: object
+  additionalProperties: false
+  required: [base_url, provider, model]
+  properties:
+    base_url: {type: string}
+    provider: {type: string}
+    model: {type: string, maxLength: 512}
+output_schema:
+  type: object
+  additionalProperties: false
+  required: [base_url, provider, model]
+  properties:
+    base_url: {type: string}
+    provider: {type: string}
+    model: {type: string}

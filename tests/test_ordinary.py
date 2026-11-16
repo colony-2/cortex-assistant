@@ -10,7 +10,7 @@ import tempfile
 import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
-C2J = 'github.com/colony-2/c2j/cmd/c2j@v0.0.125-0.20261111181458-c2193c57d890'
+C2J = 'github.com/colony-2/c2j/cmd/c2j@v0.0.127-0.20261113193326-d031eb49c677'
 
 
 class OrdinaryHelper(unittest.TestCase):

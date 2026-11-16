@@ -305,6 +305,9 @@ func TestPinnedInferenceHTTPSConcurrencyAndDeadline(t *testing.T) {
 			arrived <- struct{}{}
 			<-release
 		} else if call == 1 {
+			// Exercise the SDK's real retry without spending this short overall
+			// deadline on its randomized default backoff before schema repair.
+			w.Header().Set("retry-after-ms", "1")
 			w.WriteHeader(503) // SDK retry is inside the same invocation budget.
 			return
 		} else if call >= 3 {

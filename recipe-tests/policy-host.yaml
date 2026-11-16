@@ -1,0 +1,19 @@
+id: contextual-policy
+schema_version: 2
+input_schema:
+  base_url: {type: string, required: true}
+  provider: {type: string, required: true}
+  model: {type: string, required: true}
+inputs:
+  base_url: '${{ inputs.base_url }}'
+  provider: '${{ inputs.provider }}'
+  model: '${{ inputs.model }}'
+sequence:
+  - id: policy
+    op: ./ops/bindings
+    inputs:
+      base_url: '${{ inputs.base_url }}'
+      provider: '${{ inputs.provider }}'
+      model: '${{ inputs.model }}'
+outputs:
+  accepted: '${{ sequence.policy.outputs }}'

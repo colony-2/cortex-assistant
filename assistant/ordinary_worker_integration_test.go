@@ -42,6 +42,7 @@ import (
 	workerops "github.com/colony-2/c2j/pkg/worker/ops"
 	workerworkflow "github.com/colony-2/c2j/pkg/worker/workflow"
 	"github.com/colony-2/c2j/pkg/workflowctl"
+	"github.com/colony-2/cortex-assistant/internal/turncheck"
 	"github.com/colony-2/jobdb/pkg/jobdb"
 	"github.com/colony-2/jobdb/pkg/jobdb/celltest"
 	"github.com/colony-2/jobdb/pkg/jobdb/runtime/remote"
@@ -73,7 +74,7 @@ func ordinarySourceRepository(t *testing.T) string {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, name := range []string{"assistant", "cmd/discussion-op", "ops/discussion", "go.mod", "go.sum", "discussion.yaml", "discussion-goal.yaml", "inference.yaml"} {
+	for _, name := range []string{"assistant", "cmd/discussion-op", "ops/discussion", "cmd/bindings-op", "ops/bindings", "go.mod", "go.sum", "discussion.yaml", "discussion-goal.yaml", "inference.yaml"} {
 		source := filepath.Join(root, name)
 		err = filepath.WalkDir(source, func(path string, d fs.DirEntry, walkErr error) error {
 			if walkErr != nil {
@@ -124,8 +125,15 @@ func TestOrdinaryWorkerProviderUnknownCitation(t *testing.T) { runOrdinaryWorker
 
 func TestOrdinaryFacadeRuntimeBoundary(t *testing.T)        { runOrdinaryWorker(t, "facade") }
 func TestGoalSequentialReopenAfterReplacement(t *testing.T) { runOrdinaryWorker(t, "goal") }
-func TestGoalSuccessfulProviderReopen(t *testing.T)         { runOrdinaryWorker(t, "goal-provider") }
-func TestGoalQueuedCloseAndReopen(t *testing.T)             { runOrdinaryWorker(t, "goal-queued") }
+func TestGoalSuccessfulProviderReopen(t *testing.T) {
+	t.Setenv("ASSISTANT_FORGE_FINAL_CITATION", "")
+	runOrdinaryWorker(t, "goal-provider")
+}
+func TestGoalForgedFinalCitationRejectsMissingReply(t *testing.T) {
+	t.Setenv("ASSISTANT_FORGE_FINAL_CITATION", "1")
+	runOrdinaryWorker(t, "goal-provider")
+}
+func TestGoalQueuedCloseAndReopen(t *testing.T) { runOrdinaryWorker(t, "goal-queued") }
 
 func TestGoalOrdinaryConfirmedDispatch(t *testing.T) { runOrdinaryWorker(t, "goal-dispatch") }
 func TestGoalOrdinaryTerminalDispatchDiscovery(t *testing.T) {
@@ -316,6 +324,9 @@ func runOrdinaryWorker(t *testing.T, mode string) {
 			if mode == "citation" || mode == "goal-guard-citation" {
 				citations = []string{"forged-source"}
 			}
+			if mode == "goal-provider" && requestCount == 3 && os.Getenv("ASSISTANT_FORGE_FINAL_CITATION") == "1" {
+				citations = []string{"forged-third-turn-source"}
+			}
 			responseText := "provider grounded reply"
 			if mode == "goal-large" && requestCount > 1 {
 				responseText = strings.Repeat("r", (32<<10)-32) + " retained large reply"
@@ -361,16 +372,15 @@ func runOrdinaryWorker(t *testing.T, mode string) {
 			w.Header().Set("Content-Type", "application/json")
 			json.NewEncoder(w).Encode(map[string]any{"id": "fixture-chat", "object": "chat.completion", "created": 1, "model": "fixture", "choices": []any{map[string]any{"index": 0, "finish_reason": "tool_calls", "message": map[string]any{"role": "assistant", "content": nil, "tool_calls": []any{map[string]any{"id": "result-call", "type": "function", "function": map[string]any{"name": function["name"], "arguments": resultBytes}}}}}}, "usage": map[string]any{"prompt_tokens": 10, "completion_tokens": 10, "total_tokens": 20}})
 		}))
-		if candidate != "" || mode == "goal-guard-untrusted-tls" {
-			server.StartTLS()
-			configureCandidateTLS(t, server, mode)
-		} else {
-			server.Start()
-		}
+		server.StartTLS()
+		configureCandidateTLS(t, server, mode)
 		defer server.Close()
 		baseURL, provider = server.URL+"/exact/root", "openai"
 	}
 	timeout := 2 * time.Minute
+	if mode == "goal-provider" || mode == "facade" {
+		timeout = 4 * time.Minute
+	}
 	if mode == "goal-large" {
 		timeout = 12 * time.Minute
 	}
@@ -490,6 +500,7 @@ func runOrdinaryWorker(t *testing.T, mode string) {
 		frozen.Documents[0].SHA256 = fmt.Sprintf("%x", sha256.Sum256([]byte(frozen.Documents[0].Text)))
 	}
 	var facade *Client
+	var facadeSession string
 	caller := Caller{TenantID: "tenant", Actor: input.Actor{Kind: "human", ID: "ordinary-user"}}
 	var key jobref.Ref
 	if candidate != "" || mode == "facade" || strings.HasPrefix(mode, "goal") {
@@ -550,6 +561,7 @@ func runOrdinaryWorker(t *testing.T, mode string) {
 			t.Fatal(e)
 		}
 		key = jobref.Ref{TenantID: "tenant", JobID: session.JobID, GoalID: session.GoalID}
+		facadeSession = session.ID
 		retry, e := facade.StartFrozen(ctx, caller, StartInput{RequestID: "facade", SubmittedAt: frozen.At, Prompt: "discuss global evidence", Source: frozen.Source}, frozen, snapshotSelection(frozen))
 		if e != nil || retry.JobID != session.JobID || retry.GoalID != session.GoalID {
 			t.Fatalf("frozen start retry changed identity: %+v %v", retry, e)
@@ -562,6 +574,29 @@ func runOrdinaryWorker(t *testing.T, mode string) {
 	}
 	if err != nil {
 		t.Fatal(err)
+	}
+	if !guardMode && mode != "goal-retention" {
+		initial := key
+		defer func() {
+			auditCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), time.Minute)
+			defer cancel()
+			reader := facade
+			if reader == nil {
+				reader = &Client{host: Host{History: wrapped, Control: ctl}}
+			}
+			// Scan each retained execution, including cancelled predecessors and
+			// reopened successors, rather than only the current facade page.
+			jobs, e := rt.ListJobs(auditCtx, jobdb.ListJobsRequest{TenantIds: []string{"tenant"}, GoalIDs: []string{initial.GoalID}, IncludeHidden: true, PageSize: 100})
+			if e != nil {
+				t.Fatal(e)
+			}
+			if jobs.NextPageToken != "" {
+				t.Fatal("credential audit unexpectedly truncated")
+			}
+			for _, job := range jobs.Jobs {
+				auditOrdinaryRetention(t, auditCtx, reader, caller, job.JobKey.JobId, fixtureSecret)
+			}
+		}()
 	}
 	candidateRetentionCaptured := false
 	if candidate != "" {
@@ -694,6 +729,9 @@ func runOrdinaryWorker(t *testing.T, mode string) {
 	if candidate != "" {
 		writeLifecycleCase(t, "initial-prompt", prompt)
 	}
+	if valid && facade != nil {
+		requirePositiveTurn(t, ctx, &jobinspect.Service{Runtime: rt, Tenant: caller.TenantID}, facade, caller, facadeSession, turncheck.Turn{JobID: key.JobID, Protocol: protocol, Opening: true})
+	}
 	if guardMode {
 		requestMu.Lock()
 		actual := append([]map[string]any(nil), requests...)
@@ -725,6 +763,7 @@ func runOrdinaryWorker(t *testing.T, mode string) {
 			}, fixtureSecret)
 			candidateRetentionCaptured = true
 		}
+		auditOrdinaryRetention(t, ctx, facade, caller, key.JobID, fixtureSecret)
 		exerciseActualRetentionLoss(t, ctx, facade, caller, key, dbPath, blobDir)
 		return
 	}
@@ -820,7 +859,8 @@ func runOrdinaryWorker(t *testing.T, mode string) {
 			}
 			request := *details.Form.RequestId
 			prompt := strings.Repeat("a", OrdinaryLimits().Human-32) + fmt.Sprintf(" retained turn %02d", i)
-			if _, e = facade.Respond(ctx, caller, key.GoalID, input.StructuredSubmission{RequestID: request, SubmissionID: fmt.Sprintf("large-%d", i), Response: map[string]any{"command": "send", "prompt": prompt}}); e != nil {
+			receipt, e := facade.Respond(ctx, caller, key.GoalID, input.StructuredSubmission{RequestID: request, SubmissionID: fmt.Sprintf("large-%d", i), Response: map[string]any{"command": "send", "prompt": prompt}})
+			if e != nil {
 				t.Fatal(e)
 			}
 			for ctx.Err() == nil {
@@ -833,6 +873,7 @@ func runOrdinaryWorker(t *testing.T, mode string) {
 			if ctx.Err() != nil {
 				t.Fatal("large turn", i, ctx.Err())
 			}
+			requirePositiveTurn(t, ctx, &jobinspect.Service{Runtime: rt, Tenant: caller.TenantID}, facade, caller, facadeSession, turncheck.Turn{JobID: key.JobID, Protocol: protocol, Receipt: receipt.Receipt})
 			t.Logf("retained large turn %d", i)
 		}
 		d, e := facade.read(ctx, caller, key.JobID)
@@ -868,7 +909,7 @@ func runOrdinaryWorker(t *testing.T, mode string) {
 		}
 	}
 	if mode == "goal" || mode == "goal-provider" || mode == "goal-large" {
-		exerciseGoalLifecycle(t, ctx, facade, caller, key, frozen, rt, scoped, registry, mode == "goal-provider", func() { stopWorker(); <-done }, func(replacement jobworkflow.Engine) {
+		exerciseGoalLifecycle(t, ctx, facade, caller, key, frozen, rt, scoped, registry, mode == "goal-provider", mode == "goal-provider" || mode == "goal-large", func() { stopWorker(); <-done }, func(replacement jobworkflow.Engine) {
 			workerCtx, stopWorker = context.WithCancel(ctx)
 			done = make(chan struct{})
 			go func() { defer close(done); replacement.Run(workerCtx) }()
@@ -986,6 +1027,26 @@ func runOrdinaryWorker(t *testing.T, mode string) {
 		}
 		if ctx.Err() != nil {
 			t.Fatal("no fresh input after send", ctx.Err())
+		}
+		if facade != nil {
+			api := &jobinspect.Service{Runtime: rt, Tenant: caller.TenantID}
+			turn := turncheck.Turn{JobID: key.JobID, Protocol: protocol, Receipt: sent.Receipt}
+			if mode == "citation" {
+				// This fixture forges every reply, including the accepted Send.
+				// Its own completed invalid turn must not pass the positive checker.
+				proof, checkErr := positiveTurn(ctx, api, facade, caller, facadeSession, turn)
+				want := "missing valid reply in job " + key.JobID + " after " + priorRequest + "/send-after-replacement"
+				if !errors.Is(checkErr, turncheck.ErrMissingValidReply) || checkErr.Error() != want || proof.InputTask == nil || proof.AcceptTask == nil || proof.ResponseTask.ID == "" || proof.FormTask.ID == "" || proof.Reply.Text != "" || proof.Reply.Error != "The model response could not be validated." {
+					t.Fatalf("citation turn rejected for wrong reason: %v; proof=%+v", checkErr, proof)
+				}
+				var prompt PromptRequest
+				if current.Form.Request == nil || decode(*current.Form.Request, &prompt) != nil || prompt.Assistant.Error != proof.Reply.Error || prompt.Assistant.Text != "" {
+					t.Fatal("citation turn lacks safe next form")
+				}
+				writeLifecycleCase(t, "unknown-citation-turn", map[string]any{"turn_evidence": proof, "positive_check_error": checkErr.Error(), "safe_form": current.Form})
+			} else {
+				requirePositiveTurn(t, ctx, api, facade, caller, facadeSession, turn)
+			}
 		}
 		if _, e = inputs.SubmitStructuredResponse(ctx, "tenant", key.JobID, input.StructuredSubmission{RequestID: priorRequest, SubmissionID: "stale", Response: Command{Command: "finish"}}, input.Actor{Kind: "human", ID: "ordinary-user"}); e == nil {
 			t.Fatal("stale input consumed current prompt")

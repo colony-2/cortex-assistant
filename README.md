@@ -10,11 +10,20 @@ review; local fixture commits are not published releases.
 
 Configure `assistant.New` with `GoalProtocol`, the published immutable
 `git+https://github.com/colony-2/cortex-assistant.git//discussion-goal.yaml@<40-hex-commit>`
-selector, matching `RecipeCommit`, stable deployment `CursorKey`, and trusted
-`OrdinaryBindings`. Bindings require an exact HTTPS API root, `openai`, an
-unqualified model and `secrets.Reference{Name: "assistant_api_key"}`. They are
-server configuration. The caller needs existing authority for the named secret;
-the runtime resolves the opaque reference for execution.
+selector, matching `RecipeCommit`, and stable deployment `CursorKey`. Omit
+`Bindings` for automatic v4 context: execution resolves `codex_api_base_url` and
+`codex_model` as string configuration values, uses provider `openai`, and resolves
+`secrets.Reference{Name: "codex_api_key"}` with existing caller authority.
+Construction, frozen preparation and retained reads do not look up these values.
+Each consuming task records its snapshot; later turns may see changed settings.
+Missing, null, empty or incompatible values fail explicitly, without fallback.
+
+Complete `OrdinaryBindings` remain supported and preserve exact accepted strings:
+an HTTPS API root, provider `openai`, an unqualified model of at most 512 UTF-8
+bytes, and an authorized named secret reference. Empty/partial explicit objects
+remain invalid. An ordinary nonsecret policy step validates routing before the
+unchanged inference leaf resolves its separately declared key. Endpoint paths and
+accepted model strings are forwarded unchanged.
 
 Capture the snapshot and independent `SnapshotSelection` at the trusted request
 boundary, including tenant, exact review request and original document producers.
@@ -53,8 +62,8 @@ encoded JSON bounds both apply. These are per-operation/page limits, not a total
 conversation limit.
 
 Current dependencies are Go 1.26, c2j
-`v0.0.125-0.20261111181458-c2193c57d890` and JobDB
-`v0.0.81-0.20261110034917-7f6133791ec9`. The ordinary inference selector is:
+`v0.0.127-0.20261113193326-d031eb49c677` and JobDB
+`v0.0.83-0.20261113185824-501cebc4359f`. The ordinary inference selector is:
 
 ```
 nix:github:colony-2/c2ops/6396e1fe6462084e85ea44d86d372bdf3b133db0#pydantic
@@ -70,12 +79,17 @@ with SQLite, retained queued reads, an unavailable submit adapter and an unrelat
 ordinary recipe.
 
 The ordinary integration suite resolves actual helpers from a committed local
-source fixture and executes the immutable c2ops payload. A trusted test manifest
-adds its `--fixture-loopback` flag for a deterministic HTTP provider; production
-inputs cannot enable it. Evidence records model bodies, task/receipt/artifact
-origins and downloaded-byte hashes. This establishes source behavior with those
-fixture boundaries. Same-route immutable assistant resolution remains a separate
-release check. Cortex owns later HTTP/browser integration.
+source fixture and executes the immutable c2ops payload against a trusted HTTPS
+provider fixture, with a child-only test CA. Candidate verification uses the
+complete managed commit C and checks its selected/resolved identity and unchanged
+inference package hashes. It also checks the final recovered reply independently
+and requires a citation-only mutation to produce the precise missing-valid-reply
+rejection. This does not establish live-provider or public-fetch behavior.
+
+The versioned [`assistanttest` package](docs/assistanttest.md) supplies checked
+inference fixtures, independent turn assertions and optional ordinary composition.
+Consumer fixtures select their own committed F; modified bytes are never served
+under production C. Cortex can keep its existing Host, adapters and runner.
 
 Explicit v1/v2/v3 descriptors preserve historical reads, identities and pending
 executions. V3 uses `discussion.yaml`, has no supported reopen and rejects

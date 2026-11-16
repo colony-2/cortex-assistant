@@ -109,7 +109,6 @@ func (c *Client) PrepareReopen(ctx context.Context, w Caller, capturedJob, reque
 	if len(latest) != 1 || latest[0].Story.JobID != capturedJob {
 		return FrozenStart{}, ErrStale
 	}
-	b := *c.cfg.Bindings
 	id := "assistant-" + identity(w.TenantID, d.Story.GoalID, requestID)
 	contextJob, prompt := d.ContextJob, ""
 	if d.Capture != nil {
@@ -118,7 +117,11 @@ func (c *Client) PrepareReopen(ctx context.Context, w Caller, capturedJob, reque
 	if contextJob == "" {
 		prompt = d.OpeningPrompt
 	}
-	inputs := map[string]any{"protocol": GoalProtocol, "session_id": d.Story.GoalID, "previous_job": capturedJob, "prior_job": contextJob, "prompt": prompt, "snapshot": d.Snapshot, "base_url": b.BaseURL, "api_key": b.APIKey, "provider": b.Provider, "model": b.Model}
+	inputs, err := c.bindingInputs()
+	if err != nil {
+		return FrozenStart{}, err
+	}
+	inputs["protocol"], inputs["session_id"], inputs["previous_job"], inputs["prior_job"], inputs["prompt"], inputs["snapshot"] = GoalProtocol, d.Story.GoalID, capturedJob, contextJob, prompt, d.Snapshot
 	if len(mustJSON(inputs)) > OrdinaryEnvelopeMaxBytes {
 		return FrozenStart{}, ErrLimit
 	}

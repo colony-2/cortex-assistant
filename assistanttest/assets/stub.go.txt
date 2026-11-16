@@ -1,0 +1,69 @@
+// This fixture leaf has no provider, broker, receipts or conversation driver.
+package main
+
+import (
+	"bufio"
+	"encoding/json"
+	"fmt"
+	"io"
+	"os"
+	"strings"
+)
+
+func main() {
+	if run() != nil {
+		fmt.Fprintln(os.Stderr, "assistanttest: unexpected or invalid inference invocation")
+		os.Exit(1)
+	}
+}
+func run() error {
+	raw, e := io.ReadAll(io.LimitReader(os.Stdin, 262145))
+	if e != nil || len(raw) > 262144 {
+		return fmt.Errorf("input")
+	}
+	var in struct {
+		API struct {
+			BaseURL string `json:"base_url"`
+			APIKey  string `json:"api_key"`
+		} `json:"api"`
+		Provider string         `json:"default_provider"`
+		Model    string         `json:"default_model"`
+		Prompt   string         `json:"prompt"`
+		Schema   map[string]any `json:"response_schema"`
+		Timeout  float64        `json:"invocation_timeout"`
+	}
+	if json.Unmarshal(raw, &in) != nil || in.API.BaseURL == "" || in.API.APIKey == "" || in.Provider != "openai" || in.Model == "" || len(in.Schema) == 0 || in.Timeout <= 0 {
+		return fmt.Errorf("contract")
+	}
+	var scenario struct {
+		Replies []struct {
+			User     string `json:"user"`
+			Response string `json:"response"`
+			Model    string `json:"model"`
+		} `json:"replies"`
+	}
+	b, e := os.ReadFile("scenario.json")
+	if e != nil || json.Unmarshal(b, &scenario) != nil {
+		return fmt.Errorf("scenario")
+	}
+	user := ""
+	scan := bufio.NewScanner(strings.NewReader(in.Prompt))
+	scan.Buffer(make([]byte, 4096), 262144)
+	for scan.Scan() {
+		line := scan.Text()
+		if strings.HasPrefix(line, "USER ") {
+			if json.Unmarshal([]byte(strings.TrimPrefix(line, "USER ")), &user) != nil {
+				return fmt.Errorf("user")
+			}
+		}
+	}
+	if scan.Err() != nil {
+		return scan.Err()
+	}
+	for _, r := range scenario.Replies {
+		if r.User == user {
+			return json.NewEncoder(os.Stdout).Encode(map[string]any{"output": map[string]any{"response": r.Response, "model": r.Model, "usage": map[string]any{}}})
+		}
+	}
+	return fmt.Errorf("unmatched user")
+}

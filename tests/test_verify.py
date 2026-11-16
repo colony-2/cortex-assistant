@@ -156,6 +156,17 @@ class Runtime(unittest.TestCase):
     def runner(self, **kwargs):
         return v.Verification(self.root, kwargs.pop('candidate', self.head), **kwargs)
 
+    def test_child_resource_bounds(self):
+        # Exercise a real child: inherited high CPU/build settings must not
+        # overwhelm nested ordinary helper builds or mutate the parent process.
+        with patch.dict(os.environ, GOMAXPROCS='128', GOFLAGS='-p=128'):
+            run = self.runner()
+            actual = json.loads(run.command([sys.executable, '-c',
+                'import json, os; print(json.dumps([os.environ["GOMAXPROCS"], os.environ["GOFLAGS"]]))']))
+            self.assertEqual(actual, ['2', '-p=1'])
+            self.assertEqual(os.environ['GOMAXPROCS'], '128')
+            self.assertEqual(os.environ['GOFLAGS'], '-p=128')
+
     def test_actual_candidate_success_and_failure_integrity(self):
         for text, status in ((VALID, 'passed'), ('# Title only', 'failed')):
             (self.root / 'PURPOSE.md').write_text(text)
@@ -324,6 +335,8 @@ class Runtime(unittest.TestCase):
                         kind = {'version': 'missing-go', 'vet': 'vet', 'test': 'test', 'run': 'native', 'list': 'modules'}[args[1]]
                     elif '-m' in args and 'unittest' in args: kind = 'hook'
                     if kind == 'native' and 'validate' in args: kind = 'include'
+                    if kind == 'native':
+                        self.assertEqual(args[args.index('--parallelism') + 1], '1')
                     if kind:
                         calls.append(kind)
                         if failure == 'untracked' and kind == 'hook':
@@ -424,21 +437,96 @@ class Candidates(unittest.TestCase):
         run = self.runner()
         expected = ['finish-reaches-success-without-followup-model', 'invalid-then-finish',
                     'confirm-then-finish', 'send-then-finish']
-        summary = {'cases': 4, 'results': [dict(case_id=name, status='passed') for name in expected]}
+        expected += ['declared-secret-include', 'declared-secret-other-workspace', 'missing-key', 'empty-key']
+        expected += ['policy-' + name for name in ('exact', 'long-url', 'large-url', 'http', 'userinfo', 'query', 'fragment', 'provider', 'prefix', 'backslash', 'too-long', 'whitespace', 'control', 'empty-query', 'empty-fragment')]
+        expected += ['goal-' + name for name in ('contextual', 'explicit', 'malformed', 'executable', 'citation', 'reject-test-actor')]
+        expected += ['goal-' + setting + '-' + kind for setting in ('codex_api_base_url', 'codex_model') for kind in ('missing', 'null', 'empty', 'wrong-type')]
+        groups = {'session.test.yaml': [], 'inference.test.yaml': [],
+                  'contextual-policy.test.yaml': [], 'contextual-goal.test.yaml': []}
+        for name in expected:
+            file = ('contextual-policy.test.yaml' if name.startswith('policy-') else
+                    'contextual-goal.test.yaml' if name.startswith('goal-') else
+                    'inference.test.yaml' if name in ('declared-secret-include', 'declared-secret-other-workspace', 'missing-key', 'empty-key') else
+                    'session.test.yaml')
+            groups[file].append(dict(case_id=name, status='passed'))
+        summary = dict(selected=4, failed=0, suites=[dict(file=name, status='passed') for name in groups])
         path = artifacts / 'summary.json'
         with self.assertRaises(FileNotFoundError):
             run.validate_native(artifacts)
         path.write_text(json.dumps(summary))
+        for file, results in groups.items():
+            directory = artifacts / 'suites' / file
+            directory.mkdir(parents=True)
+            (directory / 'summary.json').write_text(json.dumps(dict(cases=len(results), results=results)))
         run.validate_native(artifacts)
+        suite_path = artifacts / 'suites' / 'session.test.yaml' / 'summary.json'
+        suite = json.loads(suite_path.read_text())
         for status in ('failed', 'skipped'):
-            summary['results'][0]['status'] = status
-            path.write_text(json.dumps(summary))
+            suite['results'][0]['status'] = status
+            suite_path.write_text(json.dumps(suite))
             with self.assertRaises(ValueError):
                 run.validate_native(artifacts)
-        summary['results'].pop()
-        path.write_text(json.dumps(summary))
+        suite['results'][0]['status'] = 'passed'
+        suite['results'].pop()
+        suite_path.write_text(json.dumps(suite))
         with self.assertRaises(ValueError):
             run.validate_native(artifacts)
+
+    @staticmethod
+    def recovered_fixture(mutated=False):
+        def proof(job, submission):
+            receipt = dict(request_id='request-' + job, submission_id=submission,
+                           actor=dict(kind='human', id='person'))
+            origin = dict(job_id=job, invocation='response-' + job, attempt=1)
+            reply = dict(text='valid reply')
+            return dict(turn=dict(job_id=job, receipt=receipt),
+                        input_task=dict(id='input-' + job), accept_task=dict(id='accept-' + job),
+                        response_task=dict(id='response-' + job, status='succeeded', attempt=1, path='cortex-assistant-session/infer/sequence/response'),
+                        form_task=dict(id='form-' + job, status='succeeded', path='cortex-assistant-session/prompt/sequence/form'), origin=origin,
+                        reply=reply, replay=dict(origin=origin, role='assistant', status='succeeded', **reply))
+        earlier = proof('second', 'after-reopen')
+        final = proof('third', 'retained-media-followup')
+        data = dict(ambiguous_submit_recovery=dict(reconciled=dict(job_id='third')),
+                    turn_proofs=[earlier] if mutated else [earlier, final], final_turn=final['turn'])
+        if mutated:
+            data['final_citation_mutation'] = dict(turn=final['turn'],
+                positive_check_error='missing valid reply in job third after request-third/retained-media-followup',
+                turn_evidence=dict(final, reply=dict(text='', error='The model response could not be validated.')),
+                safe_form=dict(request=dict(assistant=dict(error='The model response could not be validated.'))),
+                validation_error='The model response could not be validated.', safe_next_request='new-request')
+        return data
+
+    def test_recovered_final_turn_requires_precise_positive_and_mutation(self):
+        directory = Path(self.temp.name) / 'recovered'
+        directory.mkdir()
+        path = directory / 'sequential-reopen.json'
+        run = self.runner()
+        for mutated in (False, True):
+            data = self.recovered_fixture(mutated)
+            path.write_text(json.dumps(data))
+            run.validate_recovered_turn(directory, mutated)
+            variants = []
+            if mutated:
+                for key, value in (('positive_check_error', 'timeout'), ('validation_error', 'startup failure'),
+                                   ('safe_next_request', 'request-third')):
+                    changed = json.loads(json.dumps(data))
+                    changed['final_citation_mutation'][key] = value
+                    variants.append(changed)
+            else:
+                for key, value in (('job_id', 'second'),):
+                    changed = json.loads(json.dumps(data))
+                    changed['turn_proofs'][-1]['turn'][key] = value
+                    variants.append(changed)
+                changed = json.loads(json.dumps(data))
+                changed['turn_proofs'][-1]['reply']['error'] = 'invalid citation'
+                variants.append(changed)
+                changed = json.loads(json.dumps(data))
+                changed['turn_proofs'].pop()
+                variants.append(changed)
+            for changed in variants:
+                path.write_text(json.dumps(changed))
+                with self.assertRaises(ValueError):
+                    run.validate_recovered_turn(directory, mutated)
 
     def case_fixture(self):
         artifacts = Path(self.temp.name) / 'cases-evidence'
@@ -458,6 +546,8 @@ class Candidates(unittest.TestCase):
             (directory / 'candidate.json').write_text(json.dumps(case))
             for name in v.behavior_artifacts(mode):
                 (directory / name).write_text(json.dumps(dict(download_outcome='unavailable', replay_outcome='unavailable', reopen_outcome='unavailable')))
+            if mode == 'goal-provider':
+                (directory / 'sequential-reopen.json').write_text(json.dumps(self.recovered_fixture(test.endswith('RejectsMissingReply'))))
             if mode == 'goal-retention':
                 case['inspection_phase'] = 'source/task inspection before intentional loss'
                 (directory / 'candidate.json').write_text(json.dumps(case))
@@ -472,6 +562,24 @@ class Candidates(unittest.TestCase):
             'package': {'selector': v.INFERENCE, 'sha256_before': v.PACKAGE_HASHES, 'sha256_after': v.PACKAGE_HASHES}}))
         events = [dict(Package='github.com/colony-2/cortex-assistant/assistant', Test=test, Action='pass')
                   for test in set(v.ORDINARY_CASES) | v.COMPATIBILITY_CASES]
+        events += [dict(Package=package, Test=test, Action='pass')
+                   for package, required in v.SUPPORT_CASES.items() for test in required]
+        for adapter in ('local', 'remote'):
+            for suffix in ('valid', 'forged-final'):
+                directory = (artifacts / 'cases' / 'assistanttest' /
+                             'TestOrdinaryCompositionLocalRemoteAndTurns' / (adapter + '-' + suffix))
+                directory.mkdir(parents=True, exist_ok=True)
+                data = self.recovered_fixture(suffix == 'forged-final')
+                case = dict(production_commit=self.head, fixture_commit='f' * 40,
+                    fixture_selector='fixture@' + 'f' * 40, resolved_fixture=True, adapter=adapter,
+                    mutated=suffix == 'forged-final', original_job='initial', reopened_job='reopened',
+                    worker_wrapper_calls=1, host_wrapper_calls=1, resource_close_calls=1,
+                    turn_proofs=[self.recovered_fixture()['turn_proofs'][0]] * (2 if suffix == 'forged-final' else 3), final_turn=data['final_turn'])
+                case['original_job'] = 'second'
+                if case['mutated']:
+                    case.update(negative_proof=data['final_citation_mutation']['turn_evidence'],
+                        mutation_error=data['final_citation_mutation']['positive_check_error'])
+                (directory / 'conversation.json').write_text(json.dumps(case))
         events += [dict(Package='github.com/colony-2/cortex-assistant/cmd/' + name, Action='skip')
                    for name in ('assistant-op', 'discussion-op')]
         return artifacts, {'tree': tree}, events

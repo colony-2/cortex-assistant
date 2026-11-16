@@ -14,6 +14,33 @@ BASELINE = 'd2c4a33352f3f0e888b172946fca69caffd573df'
 # Explicitly reviewed inventory: additions still require a coverage decision.
 APPLICATION_FILES = frozenset({
     'README.md',
+    'assets.go',
+    'assistanttest/contextual_worker_test.go',
+    'assistanttest/contract_test.go',
+    'assistanttest/authority_test.go',
+    'assistanttest/example_test.go',
+    'internal/turncheck/check_test.go',
+    'docs/assistanttest.md',
+
+    'assistant/contextual_bindings.go',
+    'assistant/contextual_bindings_test.go',
+    'assistant/positive_turn_test.go',
+    'assistanttest/fixture.go',
+    'assistanttest/fixture_test.go',
+    'assistanttest/harness.go',
+    'assistanttest/harness_test.go',
+    'assistanttest/scenario.go',
+    'assistanttest/turns.go',
+    'assistanttest/assets/inference-manifest.json',
+    'assistanttest/assets/stub.go.txt',
+    'cmd/bindings-op/main.go',
+    'cmd/bindings-op/main_test.go',
+    'internal/turncheck/check.go',
+    'ops/bindings/op.yaml',
+    'recipe-tests/contextual-goal.test.yaml',
+    'recipe-tests/contextual-policy.test.yaml',
+    'recipe-tests/policy-host.yaml',
+
     'assistant/activity.go',
     'assistant/activity_test.go',
     'assistant/assistant_test.go',
@@ -84,7 +111,7 @@ APPLICATION_FILES = frozenset({
     'session.yaml',
     'tests/test_ordinary.py',
 })
-C2J_CLI = 'github.com/colony-2/c2j/cmd/c2j@v0.0.125-0.20261111181458-c2193c57d890'
+C2J_CLI = 'github.com/colony-2/c2j/cmd/c2j@v0.0.127-0.20261113193326-d031eb49c677'
 OMISSIONS = ('Actual-provider execution (opt-in, separately bound evidence); '
              'public assistant remote fetchability; Cortex consumer integration; '
              'hosted CI runners/caches/platform matrices; publishing/deployment.')
@@ -97,6 +124,7 @@ ORDINARY_CASES = {
     'TestOrdinaryFacadeRuntimeBoundary': 'facade',
     'TestGoalSequentialReopenAfterReplacement': 'goal',
     'TestGoalSuccessfulProviderReopen': 'goal-provider',
+    'TestGoalForgedFinalCitationRejectsMissingReply': 'goal-provider',
     'TestGoalQueuedCloseAndReopen': 'goal-queued',
     'TestGoalOrdinaryConfirmedDispatch': 'goal-dispatch',
     'TestGoalOrdinaryTerminalDispatchDiscovery': 'goal-dispatch-loss',
@@ -121,7 +149,18 @@ COMPATIBILITY_CASES = {
     'TestWorkerLegacyPendingThroughCurrentHost', 'TestPendingInputRestoration',
     'TestFrozenStartSurvivesReplacementAndUncertainReceipt',
     'TestGoalCloseCapturedQueuedProcessingAndWaiting',
-    'TestPinnedInferenceHTTPSConcurrencyAndDeadline',
+    'TestPinnedInferenceHTTPSConcurrencyAndDeadline', 'TestPinnedAdapterRejectsInvalidBindingsBeforeProvider',
+}
+SUPPORT_CASES = {
+    'github.com/colony-2/cortex-assistant/cmd/bindings-op': {
+        'TestPolicyClosedAndExact', 'TestPolicyAcceptedEndpointRange'},
+    'github.com/colony-2/cortex-assistant/assistanttest': {
+        'TestFixtureContractAndDrift', 'TestProductionDescriptorAndManifestIdentity', 'TestContextualTaskSnapshotAndReplay',
+        'TestPartialStartupCleanup', 'TestHarnessCloseJoinsBeforeTransferredResources', 'TestNativeForeignSecretAuthority',
+        'TestNativeAcceptanceRejectsMissingAndUnusedMocks',
+        *('TestOrdinaryCompositionLocalRemoteAndTurns/' + adapter + '-' + suffix
+          for adapter in ('local', 'remote') for suffix in ('valid', 'forged-final'))},
+    'github.com/colony-2/cortex-assistant/internal/turncheck': {'TestIndependentTurnEvidence'},
 }
 POSITIVE_MODES = {'success', 'goal-provider', 'goal-dispatch', 'goal-dispatch-loss',
                   'goal-retention', 'goal-large', 'goal-processing', 'goal-review',
@@ -250,14 +289,19 @@ class Verification:
         self.root = Path(root).resolve()
         self.candidate, self.directory, self.api = candidate, directory, api
         self.logs = []
-        self.command_env = dict(os.environ, PYTHONDONTWRITEBYTECODE="1")
+        # Ordinary fixtures spawn Go helper builds as well as workers. Bound both
+        # runtime threads and nested builds, even on hosts advertising many CPUs.
+        self.command_env = dict(os.environ, PYTHONDONTWRITEBYTECODE="1",
+                                GOMAXPROCS="2", GOFLAGS="-p=1")
         self.artifacts = Path(artifacts).resolve() if artifacts else None
         self.evidence = {'baseline': {'revision': BASELINE, 'tracked_inventory': ['PURPOSE.md'],
                           'workflows': [], 'mapping': 'No CI or implementation at inspected main.'},
                          'omissions': OMISSIONS, 'commands': self.logs,
                          'document': {'state': 'not_attempted', 'document_checks': 0},
                          'application': {'state': 'not_present'},
-                         'errors': [], 'tools': {'python': sys.version.split()[0]}}
+                         'errors': [], 'tools': {'python': sys.version.split()[0]},
+                         'execution_limits': {'GOMAXPROCS': '2', 'GOFLAGS': '-p=1',
+                                              'native_parallelism': 1}}
 
     def retain_go_output(self, args, stdout, stderr):
         if self.artifacts and args[:2] == ['go', 'test']:
@@ -401,13 +445,19 @@ class Verification:
                              'github.com/colony-2/cortex-assistant/assistant') or
                             (test is None and event['Package'] in {
                                 'github.com/colony-2/cortex-assistant/cmd/assistant-op',
-                                'github.com/colony-2/cortex-assistant/cmd/discussion-op'}))
+                                'github.com/colony-2/cortex-assistant/cmd/discussion-op',
+                                'github.com/colony-2/cortex-assistant'}))
             if action == 'fail' or (action == 'skip' and not skip_allowed):
                 raise ValueError('required Go execution failed/skipped: ' + str(test))
         package = 'github.com/colony-2/cortex-assistant/assistant'
         for test in set(ORDINARY_CASES) | COMPATIBILITY_CASES:
             if outcomes.get((package, test)) != 'pass':
                 raise ValueError('missing required Go pass: ' + test)
+        for package_name, required in SUPPORT_CASES.items():
+            for test in required:
+                if outcomes.get((package_name, test)) != 'pass':
+                    raise ValueError('missing required support pass: ' + test)
+        self.validate_support(artifacts)
         cases = []
         for test, mode in ORDINARY_CASES.items():
             directory = artifacts / 'cases' / test
@@ -445,6 +495,8 @@ class Verification:
             # Each case must retain its behavior proof, in addition to identity metadata.
             for name in behavior_artifacts(mode):
                 json.loads((directory / name).read_text())
+            if mode == 'goal-provider':
+                self.validate_recovered_turn(directory, test.endswith('RejectsMissingReply'))
             if mode == 'goal-retention':
                 loss = json.loads((directory / 'actual-retention-loss.json').read_text())
                 if (not case.get('inspection_phase', '').startswith('source/task inspection before') or
@@ -480,12 +532,123 @@ class Verification:
         (artifacts / 'evidence-index.md').write_text('\n'.join(index) + '\n')
         self.evidence['ordinary_acceptance'] = result
 
+    def validate_recovered_turn(self, directory, mutated):
+        data = json.loads((directory / 'sequential-reopen.json').read_text())
+        final_job = data['ambiguous_submit_recovery']['reconciled']['job_id']
+        boundary = data['final_turn']
+        if (boundary['job_id'] != final_job or boundary['receipt']['submission_id'] != 'retained-media-followup'):
+            raise ValueError('wrong final turn boundary')
+        proofs = data['turn_proofs']
+        if len(proofs) != (1 if mutated else 2):
+            raise ValueError('missing independent recovered-turn proofs')
+        for proof in proofs:
+            self.validate_positive_proof(proof)
+        if mutated:
+            result = data['final_citation_mutation']
+            turn = result['turn']
+            receipt = turn['receipt']
+            if turn != boundary:
+                raise ValueError('mutation changed final turn boundary')
+            self.validate_negative_proof(result['turn_evidence'], boundary)
+            if result['safe_form']['request']['assistant']['error'] != 'The model response could not be validated.':
+                raise ValueError('missing actual safe validation form')
+            expected = ('missing valid reply in job ' + final_job + ' after ' +
+                        receipt['request_id'] + '/retained-media-followup')
+            if (turn['job_id'] != final_job or receipt['submission_id'] != 'retained-media-followup' or
+                    result['positive_check_error'] != expected or
+                    result['validation_error'] != 'The model response could not be validated.' or
+                    not result['safe_next_request'] or result['safe_next_request'] == receipt['request_id']):
+                raise ValueError('forged final citation lacks precise missing-valid-reply rejection')
+        elif proofs[-1]['turn'] != boundary:
+            raise ValueError('final recovered turn lacks its own valid reply')
+
+    @staticmethod
+    def validate_positive_proof(proof):
+        turn, response, form = proof['turn'], proof['response_task'], proof['form_task']
+        origin, reply, replay = proof['origin'], proof['reply'], proof['replay']
+        if not turn.get('opening'):
+            if (not turn['receipt']['request_id'] or not turn['receipt']['submission_id'] or
+                    turn['receipt']['actor']['kind'] not in ('human', 'user') or
+                    not proof['input_task']['id'] or not proof['accept_task']['id']):
+                raise ValueError('missing independent human input proof')
+        if (response['status'] != 'succeeded' or not response['id'] or response['attempt'] < 1 or
+                response['path'] != 'cortex-assistant-session/infer/sequence/response' or
+                form['status'] != 'succeeded' or not form['id'] or
+                form['path'] != 'cortex-assistant-session/prompt/sequence/form' or
+                origin['job_id'] != turn['job_id'] or not origin['invocation'] or
+                origin['attempt'] != response['attempt'] or
+                not reply['text'].strip() or reply.get('error') or
+                replay['origin'] != origin or
+                replay['role'] != 'assistant' or replay['status'] != 'succeeded' or
+                replay.get('error') or replay['text'] != reply['text'] or
+                replay.get('citations', []) != reply.get('citations', [])):
+            raise ValueError('invalid independent recovered-turn proof')
+
+    @staticmethod
+    def validate_negative_proof(proof, boundary):
+        if (proof['turn'] != boundary or not proof['input_task']['id'] or
+                not proof['accept_task']['id'] or not proof['response_task']['id'] or
+                proof['response_task']['status'] != 'succeeded' or
+                not proof['form_task']['id'] or proof['form_task']['status'] != 'succeeded' or
+                proof['origin']['job_id'] != boundary['job_id'] or not proof['origin']['invocation'] or
+                proof['reply'].get('text', '').strip() or
+                proof['reply']['error'] != 'The model response could not be validated.'):
+            raise ValueError('mutation lacks recorded invalid response and next form')
+
+    def validate_support(self, artifacts):
+        for adapter in ('local', 'remote'):
+            for suffix in ('valid', 'forged-final'):
+                path = (artifacts / 'cases' / 'assistanttest' /
+                        'TestOrdinaryCompositionLocalRemoteAndTurns' / (adapter + '-' + suffix) / 'conversation.json')
+                case = json.loads(path.read_text())
+                f = case['fixture_commit']
+                if (case['production_commit'] != self.candidate or not re.fullmatch('[a-f0-9]{40}', f) or
+                        f == self.candidate or not case['fixture_selector'].endswith('@' + f) or
+                        not case['resolved_fixture'] or case['adapter'] != adapter or
+                        case['mutated'] != (suffix == 'forged-final') or
+                        case['original_job'] == case['reopened_job'] or
+                        case['worker_wrapper_calls'] < 1 or case['host_wrapper_calls'] < 1 or case['resource_close_calls'] != 1 or
+                        len(case['turn_proofs']) != (2 if case['mutated'] else 3)):
+                    raise ValueError('invalid consumer fixture/composition evidence')
+                for proof in case['turn_proofs']:
+                    self.validate_positive_proof(proof)
+                    if proof['turn']['job_id'] != case['original_job']:
+                        raise ValueError('consumer proof belongs to wrong job')
+                if case['mutated']:
+                    boundary = case['final_turn']
+                    receipt = boundary['receipt']
+                    expected = ('missing valid reply in job ' + boundary['job_id'] + ' after ' +
+                                receipt['request_id'] + '/' + receipt['submission_id'])
+                    if case['mutation_error'] != expected:
+                        raise ValueError('consumer mutation lacks precise missing reply')
+                    self.validate_negative_proof(case['negative_proof'], boundary)
+
     def validate_native(self, artifacts):
         summary = json.loads((Path(artifacts) / 'summary.json').read_text())
         expected = {'finish-reaches-success-without-followup-model', 'invalid-then-finish',
-                    'confirm-then-finish', 'send-then-finish'}
-        results = summary['results']
-        if (summary['cases'] != 4 or len(results) != 4 or
+                    'confirm-then-finish', 'send-then-finish', 'declared-secret-include',
+                    'declared-secret-other-workspace', 'missing-key', 'empty-key'}
+        expected.update('policy-' + name for name in
+                        ('exact', 'long-url', 'large-url', 'http', 'userinfo', 'query', 'fragment', 'provider', 'prefix', 'backslash', 'too-long',
+                         'whitespace', 'control', 'empty-query', 'empty-fragment'))
+        expected.update('goal-' + name for name in
+                        ('contextual', 'explicit', 'malformed', 'executable', 'citation', 'reject-test-actor'))
+        expected.update('goal-' + setting + '-' + kind
+                        for setting in ('codex_api_base_url', 'codex_model')
+                        for kind in ('missing', 'null', 'empty', 'wrong-type'))
+        suites = {'contextual-goal.test.yaml', 'contextual-policy.test.yaml',
+                  'inference.test.yaml', 'session.test.yaml'}
+        if (summary['selected'] != len(suites) or summary['failed'] != 0 or
+                {suite['file'] for suite in summary['suites']} != suites or
+                any(suite['status'] != 'passed' for suite in summary['suites'])):
+            raise ValueError('missing/failed required native suites')
+        results = []
+        cases = 0
+        for name in sorted(suites):
+            suite = json.loads((Path(artifacts) / 'suites' / name / 'summary.json').read_text())
+            cases += suite['cases']
+            results.extend(suite['results'])
+        if (cases != len(expected) or len(results) != len(expected) or
                 {case['case_id'] for case in results} != expected or
                 any(case['status'] != 'passed' for case in results)):
             raise ValueError('missing/failed required native cases')
@@ -540,14 +703,14 @@ class Verification:
                 with tempfile.TemporaryDirectory(prefix='assistant-evidence-') as temporary:
                     artifacts = self.artifacts or Path(temporary)
                     with self.candidate_environment(artifacts) as source:
-                        output = self.command(['go', 'test', './...', '-json', '-count=1', '-timeout=14m'], timeout=900)
+                        output = self.command(['go', 'test', '-p=1', './...', '-json', '-count=1', '-timeout=60m'], timeout=4200)
                         (artifacts / 'go-test.jsonl').write_bytes(output)
                         self.validate_cases(output, artifacts, source)
                 self.evidence['effective_modules'] = self.command(['go', 'list', '-m', '-json', 'all'], timeout=120).decode()
                 with tempfile.TemporaryDirectory(prefix='assistant-native-') as native_temporary:
                     artifacts = str(self.artifacts / 'native') if self.artifacts else native_temporary
-                    self.command(['go', 'run', C2J_CLI, 'test', 'run', '--file',
-                        'recipe-tests/session.test.yaml', '--out-dir', artifacts], timeout=600)
+                    self.command(['go', 'run', C2J_CLI, 'test', 'run', '--directory',
+                        'recipe-tests', '--parallelism', '1', '--out-dir', artifacts], timeout=900)
                     self.validate_native(artifacts)
                 include = self.command(['go', 'run', C2J_CLI, 'test', 'validate', '--file',
                     'recipe-tests/inference.test.yaml'], timeout=600)

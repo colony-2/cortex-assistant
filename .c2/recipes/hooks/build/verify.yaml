@@ -15,7 +15,7 @@ sequence:
   op: command_execution
   const: true
   inputs:
-    timeout: 40m
+    timeout: 100m
     run: |
       set -eu
       python3 "$WORKTREE/.c2/recipes/hooks/build/verify.py"

@@ -2,9 +2,6 @@ package assistant
 
 import (
 	"context"
-	"net/url"
-	"strings"
-	"unicode"
 
 	"github.com/colony-2/c2j/pkg/input"
 	"github.com/colony-2/c2j/pkg/recipejob"
@@ -75,12 +72,8 @@ type OrdinaryBindings struct {
 }
 
 func (b OrdinaryBindings) validate() error {
-	u, err := url.Parse(b.BaseURL)
-	if err != nil || u.Scheme != "https" || u.Hostname() == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" || strings.ContainsFunc(b.BaseURL, unicode.IsSpace) {
-		return ErrInvalid
-	}
-	if b.Provider != "openai" || text(b.Model, 512, false) != nil || strings.ContainsAny(b.Model, ":/\\") || strings.ContainsFunc(b.Model, func(r rune) bool { return unicode.IsSpace(r) || unicode.IsControl(r) }) {
-		return ErrInvalid
+	if err := ValidateInferenceBindings(b.BaseURL, b.Provider, b.Model); err != nil {
+		return err
 	}
 	if _, ok, err := secrets.Parse(b.APIKey); err != nil || !ok || b.APIKey.Name == "" || b.APIKey.Default != nil || b.APIKey.OmitIfUnavailable || b.APIKey.Required {
 		return ErrInvalid
@@ -120,7 +113,7 @@ func (c *Client) StartFrozen(ctx context.Context, w Caller, in StartInput, snaps
 // The trusted host retains the returned value before SubmitFrozenStart and reuses
 // it unchanged after transport errors; preparing again is not a retry.
 func (c *Client) PrepareStartFrozen(ctx context.Context, w Caller, in StartInput, snapshot FrozenSnapshot, selected SnapshotSelection) (FrozenStart, error) {
-	if !ordinaryProtocol(c.protocol()) || c.cfg.Bindings == nil {
+	if !ordinaryProtocol(c.protocol()) {
 		return FrozenStart{}, ErrInvalid
 	}
 	if err := c.authorize(ctx, w, "start"); err != nil {
@@ -153,8 +146,11 @@ func (c *Client) PrepareStartFrozen(ctx context.Context, w Caller, in StartInput
 		}
 	}
 	id := "assistant-" + identity(w.TenantID, in.RequestID)
-	bindings := *c.cfg.Bindings
-	inputs := map[string]any{"protocol": c.protocol(), "session_id": id, "prompt": in.Prompt, "snapshot": snapshot, "base_url": bindings.BaseURL, "api_key": bindings.APIKey, "provider": bindings.Provider, "model": bindings.Model}
+	inputs, err := c.bindingInputs()
+	if err != nil {
+		return FrozenStart{}, err
+	}
+	inputs["protocol"], inputs["session_id"], inputs["prompt"], inputs["snapshot"] = c.protocol(), id, in.Prompt, snapshot
 	if len(mustJSON(inputs)) > OrdinaryEnvelopeMaxBytes {
 		return FrozenStart{}, ErrLimit
 	}
